@@ -48,16 +48,12 @@ Fire-susceptibility layer from the 15-day precipitation forecast (`cdd.py`, test
 ## EPS tab (Singapore ensemble meteogram)
 
 A third tab, **EPS · Singapore**, shows the latest ECMWF 10-day ensemble meteogram (EPSgram) for Singapore
-(1.28967N, 103.85E) as an image, with links to the full-size picture and to the same chart on ECMWF Open Charts.
-
-* `epsgram.py` asks the Open Charts API (`charts.ecmwf.int/opencharts-api/v1/products/opencharts_meteogram/`) for the
-  newest 00/12 UTC base time, falling back to older runs until one is available, reads the image link from the JSON
-  answer and downloads the image. It is saved at build time into the site (and `cache/eps-singapore_<base time>.<ext>`
-  on the `data` branch, newest only), so visitors never call ECMWF and the page works when ECMWF is slow.
-* The image can therefore be up to one build interval (a few hours) behind. If ECMWF cannot be reached the previous
-  image is kept (its base time is shown); without any image the tab is left out and the workflow logs a warning.
-  `--no-eps` skips it. The place is `SINGAPORE` in `epsgram.py`.
-* Check ECMWF's terms for Open Charts (charts.ecmwf.int) for your use; the page credits ECMWF Open Charts.
+(1.28967N, 103.85E). Nothing is downloaded or stored by the build: the page asks ECMWF Open Charts for the image
+in the visitor's browser (`charts.ecmwf.int/opencharts-api/v1/products/opencharts_meteogram/`), starting with the
+newest 00/12 UTC base time and stepping back to older runs until one exists, so it is always the latest available.
+If the browser cannot load it there (for example ECMWF refuses cross-site requests) the tab shows links to the same
+chart on ECMWF Open Charts instead. The place and product are set at the top of `viewer.js` (`EPS`).
+Check ECMWF's terms for Open Charts for your use; the tab credits ECMWF Open Charts.
 
 ## How it stays fast
 
@@ -77,7 +73,6 @@ A third tab, **EPS · Singapore**, shows the latest ECMWF 10-day ensemble meteog
 | `--cache-dir` | `cache/` | where the cropped data is kept |
 | `--no-fetch` / `--fetch-only` | | build from the cache only / refresh the cache only |
 | `--no-cdd` | | skip the consecutive-dry-days layer |
-| `--no-eps` | | skip the EPS tab |
 | `--source aws` | aws | open-data mirror: `aws`, `google`, `azure`, `ecmwf` |
 | `--out` | `output/index.html` | |
 
@@ -118,5 +113,5 @@ from the default branch.
 
 * `wind_forecast.py` - download, cache and site build
 * `viewer.html`, `viewer.css`, `viewer.js` - the UI that is inlined into the Folium page
-* `cdd.py`, `epsgram.py`, `tests/` - consecutive-dry-days engine, EPSgram download and their tests (`python -m pytest`)
+* `cdd.py`, `tests/` - consecutive-dry-days engine and its tests (`python -m pytest`)
 * `coastlines.geojson`, `land.geojson`, `tools/make_coastlines.mjs` - coastline/border/land data and its generator

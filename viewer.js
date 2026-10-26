@@ -596,21 +596,96 @@ window.addEventListener("load", function () {
     setFrame(axisIdx());
   }
 
-  // ---- EPS tab (static image; the map and its controls are hidden behind it) --------------------------------------------
+  // ---- EPS tab: the image is loaded by the visitor's browser straight from ECMWF Open Charts ----------------------------
+  var EPS = { place: "Singapore", lat: 1.28967, lon: 103.85, epsgram: "classical_10d",
+              api: "https://charts.ecmwf.int/opencharts-api/v1/products/opencharts_meteogram/",
+              page: "https://charts.ecmwf.int/products/opencharts_meteogram" };
+  var epsStarted = false;
+
+  function epsBaseTimes(n) {                // newest 00/12 UTC first
+    var d = new Date(); d.setUTCMinutes(0, 0, 0); d.setUTCHours(d.getUTCHours() - d.getUTCHours() % 12);
+    var out = [];
+    for (var i = 0; i < n; i++) out.push(new Date(d.getTime() - i * 12 * 3600e3));
+    return out;
+  }
+  function baseStr(d) { return d.toISOString().slice(0, 16).replace(/[-:T]/g, ""); }     // YYYYMMDDHHMM
+  function epsQuery(d) {
+    return "epsgram=" + EPS.epsgram + "&base_time=" + baseStr(d) + "&lat=" + EPS.lat + "&lon=" + EPS.lon +
+      "&station_name=" + encodeURIComponent(EPS.place);
+  }
+  function epsPage(d) { return EPS.page + "?" + "base_time=" + baseStr(d) + "&epsgram=" + EPS.epsgram +
+    "&lat=" + EPS.lat + "&lon=" + EPS.lon + "&station_name=" + encodeURIComponent(EPS.place); }
+
+  function findImageUrl(doc) {              // data.link.href, else any image-looking URL in the answer
+    var data = doc && doc.data ? doc.data : doc;
+    if (data && data.link && typeof data.link.href === "string") return new URL(data.link.href, EPS.api).href;
+    var found = null;
+    (function walk(o) {
+      if (found || o == null) return;
+      if (typeof o === "string") { if (/^(https?:)?\/\/|^\//.test(o) && /\.(png|jpe?g|svg|webp)(\?|$)/i.test(o)) found = new URL(o, EPS.api).href; }
+      else if (typeof o === "object") Object.keys(o).forEach(function (k) { walk(o[k]); });
+    })(doc);
+    return found;
+  }
+  function preload(url) {                   // <img> needs no CORS; resolves once the picture really loads
+    return new Promise(function (resolve, reject) {
+      var im = new Image();
+      im.onload = function () { resolve(url); };
+      im.onerror = function () { reject(new Error("image did not load")); };
+      im.src = url;
+    });
+  }
+  function epsShow(url, base) {
+    var img = el("wv-eps-img");
+    img.src = url; img.hidden = false;
+    el("wv-eps-full").href = url; el("wv-eps-page").href = epsPage(base);
+    el("wv-eps-state").textContent = "";
+    var when = fmt(base.getTime() / 1000, { weekday: "short", day: "2-digit", month: "short", hour: "2-digit" }) + " UTC";
+    el("wv-eps-sub").textContent = "ECMWF ensemble (ENS) forecast from " + when + " (base time), the latest available";
+    el("wv-run").textContent = "10-day EPSgram \u00b7 base time " + when;
+  }
+  function epsFallback(cands, why) {        // cannot show the picture here: link to the same chart on ECMWF
+    var box = el("wv-eps-state");
+    box.innerHTML = "The chart could not be loaded into this page (" + why + "). Open it on ECMWF Open Charts: ";
+    cands.slice(0, 2).forEach(function (d, i) {
+      var a = document.createElement("a");
+      a.href = epsPage(d); a.target = "_blank"; a.rel = "noopener";
+      a.textContent = fmt(d.getTime() / 1000, { day: "2-digit", month: "short", hour: "2-digit" }) + " UTC run";
+      box.appendChild(a); if (i === 0) box.appendChild(document.createTextNode(" \u00b7 "));
+    });
+  }
+  function epsLoad() {
+    var cands = epsBaseTimes(4);
+    el("wv-eps-page").href = epsPage(cands[0]);
+    el("wv-eps-state").textContent = "Loading the latest chart from ECMWF\u2026";
+    function attempt(i) {
+      if (i >= cands.length) return epsFallback(cands, "no chart found for the last " + cands.length + " runs");
+      var d = cands[i];
+      fetch(EPS.api + "?" + epsQuery(d)).then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        if ((r.headers.get("content-type") || "").indexOf("image/") === 0) return r.blob().then(URL.createObjectURL);
+        return r.json().then(function (doc) {
+          var u = findImageUrl(doc);
+          if (!u) throw new Error("no image link in the answer");
+          return u;
+        });
+      }).then(preload).then(function (url) { epsShow(url, d); })
+        .catch(function (err) {
+          if (err instanceof TypeError) return epsFallback(cands, "the browser blocked the request to ECMWF");
+          attempt(i + 1);                   // not published yet (or an error): try the previous run
+        });
+    }
+    attempt(0);
+  }
+
   function showEps() {
     stop();
     state.view = "eps";
     document.body.classList.add("wv-eps-view");
-    var img = el("wv-eps-img");
-    if (!img.getAttribute("src")) {
-      img.src = M.eps.file;
-      el("wv-eps-full").href = M.eps.file; el("wv-eps-dl").href = M.eps.file; el("wv-eps-page").href = M.eps.page;
-    }
-    var base = fmt(M.eps.baseTime, { weekday: "short", day: "2-digit", month: "short", hour: "2-digit" }) + " UTC";
-    el("wv-eps-title").textContent = M.eps.place + " \u00b7 " + M.eps.product;
-    el("wv-eps-sub").textContent = "ECMWF ensemble (ENS) forecast from " + base + " (base time)";
-    el("wv-valid").textContent = "Ensemble meteogram \u00b7 " + M.eps.place;
-    el("wv-run").textContent = "10-day EPSgram \u00b7 base time " + base;
+    if (!epsStarted) { epsStarted = true; epsLoad(); }
+    el("wv-eps-title").textContent = EPS.place + " \u00b7 10-day ensemble meteogram (EPSgram)";
+    el("wv-valid").textContent = "Ensemble meteogram \u00b7 " + EPS.place;
+    if (!el("wv-eps-img").getAttribute("src")) el("wv-run").textContent = "10-day EPSgram \u00b7 loading\u2026";
     document.querySelectorAll("#wv-tabs button").forEach(function (b) {
       b.setAttribute("aria-selected", String(b.dataset.key === "eps"));
     });
@@ -629,13 +704,11 @@ window.addEventListener("load", function () {
     b.addEventListener("click", function () { showMap(); setModel(key); });
     el("wv-tabs").appendChild(b);
   });
-  if (M.eps) {                              // separate tab: the ECMWF ensemble meteogram image
-    var eb = document.createElement("button");
-    eb.type = "button"; eb.setAttribute("role", "tab"); eb.dataset.key = "eps";
-    eb.textContent = "EPS \u00b7 " + M.eps.place;
-    eb.addEventListener("click", showEps);
-    el("wv-tabs").appendChild(eb);
-  }
+  var eb = document.createElement("button");   // separate tab: the ECMWF ensemble meteogram image
+  eb.type = "button"; eb.setAttribute("role", "tab"); eb.dataset.key = "eps";
+  eb.textContent = "EPS \u00b7 " + EPS.place;
+  eb.addEventListener("click", showEps);
+  el("wv-tabs").appendChild(eb);
 
   var shadeSel = el("wv-shade"), levelSel = el("wv-level");
   M.levels.forEach(function (l) {
