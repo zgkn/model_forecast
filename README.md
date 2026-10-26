@@ -69,7 +69,7 @@ Check ECMWF's terms for Open Charts for your use; the tab credits ECMWF Open Cha
 |---|---|---|
 | `--models ifs aifs` | both | models to include |
 | `--max-step 144` | 144 | last forecast step in hours (IFS 00/12 UTC runs go to 360, 06/18 UTC to 144; AIFS to 360) |
-| `--workers 8` | 8 | parallel downloads |
+| `--workers 4` | 4 | parallel downloads (S3 answers "503 Slow Down" if hit harder) |
 | `--cache-dir` | `cache/` | where the cropped data is kept |
 | `--no-fetch` / `--fetch-only` | | build from the cache only / refresh the cache only |
 | `--no-cdd` | | skip the consecutive-dry-days layer |

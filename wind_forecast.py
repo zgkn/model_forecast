@@ -138,7 +138,8 @@ def fetch_step(client, run, step, tmp, which=("uv", "qt", "tp")):
 def latest_run(model, source, step):
     """Newest run of the model that has already published the given forecast step."""
     # the client's default is 500 retries 120 s apart; S3 answers "503 Slow Down" under load, so retry fast
-    client = Client(source=source, model=MODELS[model]["client_model"], maximum_retries=12, retry_after=5)
+    client = Client(source=source, model=MODELS[model]["client_model"], maximum_retries=15,
+                    retry_after=(5, 60, 1.7))      # waits grow from 5 s to 60 s
     run = client.latest(type="fc", stream="oper", step=step, param="u",
                         levtype="pl", levelist=LEVELS[0])
     return client, run
@@ -217,6 +218,18 @@ def prune_cache(cache_dir, model, keep):
             print(f"[{model}] removed old cache {old.name}", flush=True)
 
 
+def refresh_or_cached(model, source, max_step, cache_dir, workers):
+    """Refresh the model's cache; if that fails, use the newest cached run so the site can still be built."""
+    try:
+        return fetch_model(model, source, max_step, cache_dir, workers)
+    except Exception as e:
+        path = newest_cached(cache_dir, model)
+        if path is None:
+            raise
+        warn(f"{model}: could not fetch the latest run ({e}); using the cached run {path.stem.split('_')[1]}")
+        return path
+
+
 def fetch_model(model, source, max_step, cache_dir, workers):
     """Make sure the cache holds the latest run of the model; return its cache file."""
     client, run = latest_run(model, source, min(max_step, 144))
@@ -231,7 +244,11 @@ def fetch_model(model, source, max_step, cache_dir, workers):
     print(f"[{model}] run {run:%Y-%m-%d %H}Z, downloading {len(steps)} steps", flush=True)
     with tempfile.TemporaryDirectory() as tmp:
         with ThreadPoolExecutor(workers) as pool:
-            files = list(pool.map(lambda s: fetch_step(client, run, s, tmp), steps))
+            try:
+                files = list(pool.map(lambda s: fetch_step(client, run, s, tmp), steps))
+            except BaseException:
+                pool.shutdown(wait=False, cancel_futures=True)   # do not keep downloading after a failure
+                raise
         got = [(s, f) for s, f in zip(steps, files) if f is not None]
         if not got:
             sys.exit(f"no steps available for {model}")
@@ -386,7 +403,7 @@ def main():
     ap.add_argument("--models", nargs="+", choices=list(MODELS), default=list(MODELS))
     ap.add_argument("--max-step", type=int, default=144, help="last forecast step in hours (default 144)")
     ap.add_argument("--source", default="aws", help="open-data mirror: aws, google, azure, ecmwf (default aws)")
-    ap.add_argument("--workers", type=int, default=8, help="parallel downloads (default 8)")
+    ap.add_argument("--workers", type=int, default=4, help="parallel downloads (default 4; S3 throttles more)")
     ap.add_argument("--cache-dir", type=Path, default=HERE / "cache", help="where the cropped data is kept")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--no-fetch", action="store_true", help="never contact ECMWF; use the newest cached run")
@@ -402,7 +419,7 @@ def main():
             if paths[model] is None:
                 sys.exit(f"nothing cached for {model} in {args.cache_dir}")
         else:
-            paths[model] = fetch_model(model, args.source, args.max_step, args.cache_dir, args.workers)
+            paths[model] = refresh_or_cached(model, args.source, args.max_step, args.cache_dir, args.workers)
     cdd_paths = {}
     if not args.no_cdd:
         for model in args.models:        # a CDD problem must never stop the rest of the site
