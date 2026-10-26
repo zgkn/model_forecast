@@ -60,7 +60,8 @@ jobs:
         run: python wind_forecast.py --no-fetch --out site/index.html
 
       - name: Update the data branch
-        if: env.IS_DEFAULT == 'true'
+        # also after a failed build: whatever the refresh managed to download is kept for the next run
+        if: ${{ !cancelled() && env.IS_DEFAULT == 'true' }}
         working-directory: cache
         run: |
           printf '%s\n' "Cropped ECMWF open data used by the wind map." \

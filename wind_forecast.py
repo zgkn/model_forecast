@@ -42,8 +42,8 @@ import cdd
 HERE = Path(__file__).resolve().parent
 LEVELS = [925, 850, 700]  # wind levels (hPa); humidity is taken at RH_LEVEL
 RH_LEVEL = 700
-# Region: 90-128E, 12S-30N
-LAT_N, LAT_S, LON_W, LON_E = 30.0, -12.0, 90.0, 128.0
+# Region: 88-150E, 12S-30N
+LAT_N, LAT_S, LON_W, LON_E = 30.0, -12.0, 88.0, 150.0
 STEP = 0.25  # source grid spacing in degrees
 NY = round((LAT_N - LAT_S) / STEP) + 1
 NX = round((LON_E - LON_W) / STEP) + 1
@@ -435,7 +435,7 @@ def main():
         else:
             paths[model] = refresh_or_cached(model, args.source, args.max_step, args.cache_dir, args.workers)
     cdd_paths = {}
-    if not args.no_cdd:
+    if not args.no_cdd and paths:
         for model in args.models:        # a CDD problem must never stop the rest of the site
             try:
                 cdd_paths[model] = newest_cdd(args.cache_dir, model) if args.no_fetch else \
@@ -448,6 +448,14 @@ def main():
         stale.unlink()
     if args.fetch_only:
         return
+
+    if not args.fetch_only:              # a cache written for another region (domain change) is unusable
+        for model in list(paths):
+            if load_cache(paths[model]) is None:
+                warn(f"{model}: cache {paths[model].name} is for another region; leaving {model} out until it is refreshed")
+                del paths[model]
+        if not paths:
+            sys.exit("no usable cached data: run without --no-fetch to download it")
 
     site = args.out.parent
     data_dir = site / "data"

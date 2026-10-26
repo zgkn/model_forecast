@@ -1,6 +1,6 @@
 # model_forecast
 
-Interactive forecast map of **southeast Asia** (90-128E, 12S-30N) from the latest ECMWF open data, one tab per
+Interactive forecast map of **southeast Asia** (88-150E, 12S-30N) from the latest ECMWF open data, one tab per
 model (**IFS** and **AIFS**), with a time slider over every forecast step.
 
 ```
@@ -58,7 +58,7 @@ Check ECMWF's terms for Open Charts for your use; the tab credits ECMWF Open Cha
 ## How it stays fast
 
 * Each model and variable is a separate small binary file (`output/data/<model>_<run>_<var>.bin.gz`) loaded only
-  when selected; the page itself is ~35 KB. A wind level is ~2.4 MB for IFS and ~1 MB for AIFS (gzip), humidity and
+  when selected; the page itself is ~35 KB. A wind level is ~3.8 MB for IFS and ~1.6 MB for AIFS (gzip), humidity and
   rain a few hundred KB.
 * The browser draws the fields itself from the raw grid (shading, arrows, streamlines on canvas layers), so there are
   no per-frame images to decode and changing a frame takes a few milliseconds.
@@ -82,7 +82,7 @@ Steps: IFS every 3 h (6 h after +144 h on 00/12 UTC runs); AIFS every 6 h. The r
 
 ## Data cache (the `data` branch)
 
-Downloading a run takes a while, so the cropped region (int16, ~17 MB for both models, plus the small CDD files) is kept in
+Downloading a run takes a while, so the cropped region (int16, ~27 MB for both models, plus the small CDD files) is kept in
 `cache/<model>_<run>.npz`. When a newer run exists the old file is deleted. In CI the cache lives on the `data`
 branch: a single commit that the workflow force-pushes whenever there is a new run, so the history never grows.
 
