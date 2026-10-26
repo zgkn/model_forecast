@@ -73,7 +73,7 @@ Check ECMWF's terms for Open Charts for your use; the tab credits ECMWF Open Cha
 | `--cache-dir` | `cache/` | where the cropped data is kept |
 | `--no-fetch` / `--fetch-only` | | build from the cache only / refresh the cache only |
 | `--no-cdd` | | skip the consecutive-dry-days layer |
-| `--source aws` | aws | open-data mirror: `aws`, `google`, `azure`, `ecmwf` |
+| `--source google` | google | open-data mirror: `google`, `aws`, `azure`, `ecmwf`; if it fails the other of google/aws is tried (AWS throttles with `503 Slow Down` right after a release) |
 | `--out` | `output/index.html` | |
 
 Steps: IFS every 3 h (6 h after +144 h on 00/12 UTC runs); AIFS every 6 h. The region is set by

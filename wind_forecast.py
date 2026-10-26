@@ -228,10 +228,22 @@ def prune_cache(cache_dir, model, keep):
             print(f"[{model}] removed old cache {old.name}", flush=True)
 
 
+def first_working(source, fn, what):
+    """Run fn(source); on failure try the other open-data mirrors (AWS S3 throttles hard right after a release)."""
+    error = None
+    for src in [source] + [m for m in ("google", "aws") if m != source]:
+        try:
+            return fn(src)
+        except Exception as e:
+            error = e
+            warn(f"{what}: the {src} mirror failed ({e})")
+    raise error
+
+
 def refresh_or_cached(model, source, max_step, cache_dir, workers):
     """Refresh the model's cache; if that fails, use the newest cached run so the site can still be built."""
     try:
-        return fetch_model(model, source, max_step, cache_dir, workers)
+        return first_working(source, lambda src: fetch_model(model, src, max_step, cache_dir, workers), model)
     except Exception as e:
         path = newest_cached(cache_dir, model)
         if path is None:
@@ -416,7 +428,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--models", nargs="+", choices=list(MODELS), default=list(MODELS))
     ap.add_argument("--max-step", type=int, default=144, help="last forecast step in hours (default 144)")
-    ap.add_argument("--source", default="aws", help="open-data mirror: aws, google, azure, ecmwf (default aws)")
+    ap.add_argument("--source", default="google",
+                    help="open-data mirror: google, aws, azure, ecmwf (default google; AWS answers 503 Slow Down "
+                         "after a new run is released). The other mirrors are tried if it fails.")
     ap.add_argument("--workers", type=int, default=4, help="parallel downloads (default 4; S3 throttles more)")
     ap.add_argument("--cache-dir", type=Path, default=HERE / "cache", help="where the cropped data is kept")
     mode = ap.add_mutually_exclusive_group()
@@ -438,8 +452,8 @@ def main():
     if not args.no_cdd and paths:
         for model in args.models:        # a CDD problem must never stop the rest of the site
             try:
-                cdd_paths[model] = newest_cdd(args.cache_dir, model) if args.no_fetch else \
-                    fetch_cdd(model, args.source, args.cache_dir, args.workers)
+                cdd_paths[model] = newest_cdd(args.cache_dir, model) if args.no_fetch else first_working(
+                    args.source, lambda src: fetch_cdd(model, src, args.cache_dir, args.workers), f"{model} CDD")
                 if cdd_paths[model] is None:
                     warn(f"nothing cached for the {model} CDD layer")
             except Exception as e:
