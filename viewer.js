@@ -25,6 +25,14 @@ window.addEventListener("load", function () {
   var overlay = L.imageOverlay(DATA[model].frames[0].img,
     GRID.bounds, { interactive: false, opacity: 1 }).addTo(map);
 
+  // ---- coastlines and borders (Natural Earth, bundled) ---------------------
+  map.createPane("wv-coast");
+  map.getPane("wv-coast").style.zIndex = 420;
+  L.geoJSON(__COAST__, {
+    pane: "wv-coast", interactive: false,
+    style: { color: "#1a1a19", weight: 1, opacity: 0.75, fill: false }
+  }).addTo(map);
+
   // ---- arrow canvas -------------------------------------------------------
   var canvas = document.createElement("canvas");
   canvas.className = "wv-arrows";

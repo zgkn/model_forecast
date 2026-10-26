@@ -73,15 +73,21 @@ def fetch_step(client, run, step, target):
     return target
 
 
-def download(model, source, max_step, data_dir):
+def latest_run(model, source, max_step):
+    """Newest run of the model that has already published its (capped) steps."""
     client = Client(source=source, model=MODELS[model]["client_model"])
     run = client.latest(type="fc", stream="oper", step=min(max_step, 144), param="u",
                         levtype="pl", levelist=LEVEL)
+    return client, run
+
+
+def download(model, source, max_step, data_dir, workers):
+    client, run = latest_run(model, source, max_step)
     steps = candidate_steps(model, run.hour, max_step)
     out = data_dir / f"{model}_{run:%Y%m%d%H}"
     out.mkdir(parents=True, exist_ok=True)
     print(f"[{model}] run {run:%Y-%m-%d %H}Z, {len(steps)} steps -> {out}", flush=True)
-    with ThreadPoolExecutor(4) as pool:
+    with ThreadPoolExecutor(workers) as pool:
         files = list(pool.map(
             lambda s: fetch_step(client, run, s, out / f"step{s:03d}.grib2"), steps))
     return run, [(s, f) for s, f in zip(steps, files) if f is not None]
@@ -152,14 +158,16 @@ def build_model_data(model, run, step_files):
 def build_map(data, out_path):
     m = folium.Map(
         location=[(LAT_N + LAT_S) / 2, (LON_W + LON_E) / 2], zoom_start=6, min_zoom=4, max_zoom=10,
-        tiles=None, zoom_control=True,
+        tiles=None, zoom_control=True, zoom_snap=0.25,
         min_lat=LAT_S - 10, max_lat=LAT_N + 10, min_lon=LON_W - 10, max_lon=LON_E + 10, max_bounds=True,
     )
     folium.TileLayer(
-        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", name="Basemap", no_wrap=True,
-        attr='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors '
-             '&copy; <a href="https://carto.com/attributions">CARTO</a>',
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        name="Esri light gray", no_wrap=True, max_native_zoom=16,
+        attr="Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
     ).add_to(m)
+    folium.TileLayer("OpenStreetMap", name="OpenStreetMap", no_wrap=True, show=False).add_to(m)
+    folium.LayerControl(position="topright", collapsed=True).add_to(m)
     m.fit_bounds([[LAT_S, LON_W], [LAT_N, LON_E]])
     m.get_root().header.add_child(Element("<title>ECMWF 925 hPa wind</title>"))
     m.get_root().header.add_child(Element(f"<style>{(HERE / 'viewer.css').read_text()}</style>"))
@@ -171,6 +179,7 @@ def build_map(data, out_path):
                 "lat0": LAT_N, "lon0": LON_W, "d": STEP,
                 "nlat": round((LAT_N - LAT_S) / STEP) + 1, "nlon": round((LON_E - LON_W) / STEP) + 1,
                 "bounds": [[LAT_S, LON_W], [LAT_N, LON_E]]}))
+            .replace("__COAST__", (HERE / "coastlines.geojson").read_text())
             .replace("__COLORS__", json.dumps(COLORS))
             .replace("__EDGES__", json.dumps(EDGES)))
     m.get_root().script.add_child(Element(js))
@@ -182,19 +191,29 @@ def main():
     ap.add_argument("--models", nargs="+", choices=list(MODELS), default=list(MODELS))
     ap.add_argument("--max-step", type=int, default=144, help="last forecast step in hours (default 144)")
     ap.add_argument("--source", default="aws", help="open-data mirror: aws, google, azure, ecmwf (default aws)")
+    ap.add_argument("--workers", type=int, default=12, help="parallel downloads (default 12)")
+    ap.add_argument("--print-runs", action="store_true",
+                    help="print the latest available run of each model as JSON and exit")
     ap.add_argument("--data-dir", type=Path, default=HERE / "data")
     ap.add_argument("--out", type=Path, default=HERE / "output" / "wind925.html")
     args = ap.parse_args()
 
-    data = {}
+    if args.print_runs:
+        runs = {m: f"{latest_run(m, args.source, args.max_step)[1]:%Y%m%d%H}" for m in args.models}
+        print(json.dumps(runs, sort_keys=True))
+        return
+
+    data, runs = {}, {}
     for model in args.models:
-        run, step_files = download(model, args.source, args.max_step, args.data_dir)
+        run, step_files = download(model, args.source, args.max_step, args.data_dir, args.workers)
+        runs[model] = f"{run:%Y%m%d%H}"
         if not step_files:
             sys.exit(f"no steps available for {model}")
         data[model] = build_model_data(model, run, step_files)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     build_map(data, args.out)
+    (args.out.parent / "runs.json").write_text(json.dumps(runs, sort_keys=True))
     print(f"wrote {args.out} ({args.out.stat().st_size / 1e6:.1f} MB)")
 
 

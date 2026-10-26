@@ -20,6 +20,8 @@ Open `output/wind925.html` in a browser (it needs internet for the Leaflet libra
 |---|---|---|
 | `--models ifs aifs` | both | models to include |
 | `--max-step 144` | 144 | last forecast step in hours (IFS 00/12 UTC runs go to 360, 06/18 UTC to 144; AIFS to 360) |
+| `--workers 12` | 12 | parallel downloads |
+| `--print-runs` | | print the latest available run of each model and exit |
 | `--source aws` | aws | open-data mirror: `aws`, `google`, `azure`, `ecmwf` |
 | `--out` | `output/wind925.html` | |
 
@@ -33,10 +35,19 @@ Data: ECMWF open data, CC BY 4.0.
 
 * `wind_forecast.py` - download, processing, and page assembly
 * `viewer.html`, `viewer.css`, `viewer.js` - the UI that is inlined into the Folium page
+* `coastlines.geojson`, `tools/make_coastlines.mjs` - bundled coastline/border data and its generator
 
 ## Publishing (GitHub Pages)
 
-`.github/workflows/pages.yml` rebuilds the page four times a day (08:30, 14:30, 20:30, 02:30 UTC, after each
-ECMWF run is released) and deploys it to GitHub Pages. Pushes to any branch run the build only.
+`.github/workflows/pages.yml` runs four times a day (02:30, 08:30, 14:30, 20:30 UTC, after each ECMWF run is
+released) and deploys to GitHub Pages. A scheduled run first compares the newest available ECMWF runs with the
+`runs.json` of the live page and stops if nothing is new. Downloaded GRIBs are cached per run, so re-runs and
+code-only pushes do not download again. Pushes to any branch build only; the default branch also deploys.
 One-time setup: repository **Settings -> Pages -> Source: GitHub Actions**. Scheduled workflows only run from
-the default branch, so the workflow must be merged there.
+the default branch.
+
+## Map data
+
+* Background tiles: Esri World Light Gray (or OpenStreetMap, layer control top right).
+* Coastlines and borders are drawn from `coastlines.geojson` (Natural Earth 10m, public domain), so they show
+  even if tiles fail. Regenerate with `tools/make_coastlines.mjs`.
