@@ -13,7 +13,7 @@ window.addEventListener("load", function () {
 
   var el = function (id) { return document.getElementById(id); };
   var models = Object.keys(M.models);
-  var state = { model: models[0], t: 0, day: null, shade: "speed" + M.levels[0], prevShade: null,
+  var state = { view: "map", model: models[0], t: 0, day: null, shade: "speed" + M.levels[0], prevShade: null,
                 level: M.levels[0], style: "arrows" };
   var timer = null;
 
@@ -596,14 +596,46 @@ window.addEventListener("load", function () {
     setFrame(axisIdx());
   }
 
+  // ---- EPS tab (static image; the map and its controls are hidden behind it) --------------------------------------------
+  function showEps() {
+    stop();
+    state.view = "eps";
+    document.body.classList.add("wv-eps-view");
+    var img = el("wv-eps-img");
+    if (!img.getAttribute("src")) {
+      img.src = M.eps.file;
+      el("wv-eps-full").href = M.eps.file; el("wv-eps-dl").href = M.eps.file; el("wv-eps-page").href = M.eps.page;
+    }
+    var base = fmt(M.eps.baseTime, { weekday: "short", day: "2-digit", month: "short", hour: "2-digit" }) + " UTC";
+    el("wv-eps-title").textContent = M.eps.place + " \u00b7 " + M.eps.product;
+    el("wv-eps-sub").textContent = "ECMWF ensemble (ENS) forecast from " + base + " (base time)";
+    el("wv-valid").textContent = "Ensemble meteogram \u00b7 " + M.eps.place;
+    el("wv-run").textContent = "10-day EPSgram \u00b7 base time " + base;
+    document.querySelectorAll("#wv-tabs button").forEach(function (b) {
+      b.setAttribute("aria-selected", String(b.dataset.key === "eps"));
+    });
+  }
+  function showMap() {
+    if (state.view === "map") return;
+    state.view = "map";
+    document.body.classList.remove("wv-eps-view");
+  }
+
   // ---- controls -----------------------------------------------------------------------------------------------------------
   models.forEach(function (key) {
     var b = document.createElement("button");
     b.type = "button"; b.setAttribute("role", "tab"); b.dataset.key = key;
     b.textContent = M.models[key].label;
-    b.addEventListener("click", function () { setModel(key); });
+    b.addEventListener("click", function () { showMap(); setModel(key); });
     el("wv-tabs").appendChild(b);
   });
+  if (M.eps) {                              // separate tab: the ECMWF ensemble meteogram image
+    var eb = document.createElement("button");
+    eb.type = "button"; eb.setAttribute("role", "tab"); eb.dataset.key = "eps";
+    eb.textContent = "EPS \u00b7 " + M.eps.place;
+    eb.addEventListener("click", showEps);
+    el("wv-tabs").appendChild(eb);
+  }
 
   var shadeSel = el("wv-shade"), levelSel = el("wv-level");
   M.levels.forEach(function (l) {
@@ -654,7 +686,7 @@ window.addEventListener("load", function () {
   }
   el("wv-play").addEventListener("click", function () { timer ? stop() : play(); });
   document.addEventListener("keydown", function (e) {
-    if (e.target === slider || e.target.tagName === "BUTTON" || e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+    if (state.view === "eps" || e.target === slider || e.target.tagName === "BUTTON" || e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
     if (e.key === "ArrowRight") setFrame(axisIdx() + 1);
     if (e.key === "ArrowLeft") setFrame(axisIdx() - 1);
   });

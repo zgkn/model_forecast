@@ -37,6 +37,7 @@ from branca.element import Element
 from ecmwf.opendata import Client
 
 import cdd
+import epsgram
 
 HERE = Path(__file__).resolve().parent
 LEVELS = [925, 850, 700]  # wind levels (hPa); humidity is taken at RH_LEVEL
@@ -392,6 +393,7 @@ def main():
     mode.add_argument("--no-fetch", action="store_true", help="never contact ECMWF; use the newest cached run")
     mode.add_argument("--fetch-only", action="store_true", help="refresh the cache and stop")
     ap.add_argument("--no-cdd", action="store_true", help="skip the consecutive-dry-days layer")
+    ap.add_argument("--no-eps", action="store_true", help="skip the EPSgram tab (ECMWF Open Charts)")
     ap.add_argument("--out", type=Path, default=HERE / "output" / "index.html")
     args = ap.parse_args()
 
@@ -413,13 +415,22 @@ def main():
                     warn(f"nothing cached for the {model} CDD layer")
             except Exception as e:
                 warn(f"{model} CDD data unavailable: {e}")
+    eps_path = None
+    if not args.no_eps:                  # like CDD: a problem here only drops the tab
+        try:
+            eps_path = epsgram.newest_cached(args.cache_dir) if args.no_fetch else \
+                epsgram.fetch(args.cache_dir, log=lambda m: print(f"[eps] {m}", flush=True))
+            if eps_path is None:
+                warn("nothing cached for the EPSgram tab")
+        except Exception as e:
+            warn(f"EPSgram unavailable: {e}")
     if args.fetch_only:
         return
 
     site = args.out.parent
     data_dir = site / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    for pattern in ("*.bin.gz", "*cdd*.json", "*.nc"):
+    for pattern in ("*.bin.gz", "*cdd*.json", "*.nc", "eps-*"):
         for old in data_dir.glob(pattern):
             old.unlink()
     manifest = {
@@ -438,6 +449,12 @@ def main():
             manifest["models"][model]["cdd"] = write_cdd(model, path, data_dir, land)
         except Exception as e:
             warn(f"{model} CDD layer left out: {e}")
+    if eps_path is not None:
+        base = epsgram.base_time_of(eps_path)
+        (data_dir / eps_path.name).write_bytes(eps_path.read_bytes())
+        manifest["eps"] = {"file": f"data/{eps_path.name}", "baseTime": int(base.replace(tzinfo=timezone.utc).timestamp()),
+                           "place": epsgram.SINGAPORE["name"], "product": "10-day ensemble meteogram (EPSgram)",
+                           "page": epsgram.page_url(base)}
     (data_dir / "coastlines.json").write_text((HERE / "coastlines.geojson").read_text())
     build_site(manifest, args.out)
     runs = {m: p.stem.split("_")[1] for m, p in paths.items()}

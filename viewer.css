@@ -1,5 +1,6 @@
 :root {
   --wv-surface: rgba(252, 252, 251, 0.94);
+  --wv-solid: #fcfcfb;
   --wv-ink: #1a1a19;
   --wv-ink-2: #55554f;
   --wv-line: #d9d8d3;
@@ -9,6 +10,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --wv-surface: rgba(26, 26, 25, 0.94);
+    --wv-solid: #1a1a19;
     --wv-ink: #f0efec;
     --wv-ink-2: #b4b3ac;
     --wv-line: #3d3d3a;
@@ -106,6 +108,22 @@ body { font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
   #wv-legend { width: 250px; }
   #wv-bottom { bottom: 24px; }
   #wv-credit, #wv-readout { display: none; }
+  #wv-eps { padding-top: 150px; }
 }
+
+#wv-eps {
+  position: absolute; inset: 0; z-index: 900; overflow: auto; box-sizing: border-box;
+  padding: 100px 16px 24px; background: var(--wv-solid); color: var(--wv-ink);
+}
+.wv-eps-card { max-width: 1400px; margin: 0 auto; }
+.wv-eps-card h2 { margin: 0 0 2px; font-size: 18px; }
+.wv-eps-card p { margin: 4px 0; color: var(--wv-ink-2); font-size: 13px; }
+#wv-eps-img { display: block; max-width: 100%; height: auto; background: #fff; border: 1px solid var(--wv-line); border-radius: 6px; margin: 10px 0; }
+.wv-eps-card a { color: var(--wv-accent); }
+.wv-eps-credit { font-size: 11px !important; }
+body.wv-eps-view #wv-eps { display: block !important; }
+body.wv-eps-view #wv-bottom, body.wv-eps-view #wv-legend, body.wv-eps-view #wv-readout,
+body.wv-eps-view #wv-status, body.wv-eps-view #wv-credit, body.wv-eps-view .wv-controls,
+body.wv-eps-view .leaflet-control-container { display: none !important; }
 
 [hidden] { display: none !important; }
