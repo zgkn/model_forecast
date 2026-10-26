@@ -70,8 +70,9 @@ jobs:
       - name: Check output and decide whether to publish
         id: plan
         run: |
-          test "$(grep -o '"step":' site/index.html | wc -l)" -ge 10
-          ls -l site
+          test -s site/index.html
+          test "$(ls site/data/*.bin.gz | wc -l)" -ge 10
+          du -sh site; ls -l site/data
           changed=true
           if [ "${{ github.event_name }}" = "schedule" ]; then
             url="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/runs.json"

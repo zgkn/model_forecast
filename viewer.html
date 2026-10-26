@@ -1,8 +1,19 @@
 <div id="wv-top" class="wv-panel">
-  <div id="wv-tabs" role="tablist" aria-label="Model"></div>
-  <div class="wv-info">
-    <div id="wv-valid"></div>
-    <div id="wv-run"></div>
+  <div class="wv-row">
+    <div id="wv-tabs" role="tablist" aria-label="Model"></div>
+    <div class="wv-info">
+      <div id="wv-valid"></div>
+      <div id="wv-run"></div>
+    </div>
+  </div>
+  <div class="wv-row wv-controls">
+    <label>Shading <select id="wv-shade"></select></label>
+    <label>Flow <select id="wv-level"></select></label>
+    <div id="wv-style" role="group" aria-label="Flow style">
+      <button type="button" data-style="arrows" aria-pressed="true">Arrows</button>
+      <button type="button" data-style="streams" aria-pressed="false">Streamlines</button>
+      <button type="button" data-style="off" aria-pressed="false">Off</button>
+    </div>
   </div>
 </div>
 
@@ -15,9 +26,11 @@
 </div>
 
 <div id="wv-legend" class="wv-panel">
-  <div class="wv-legend-title">Wind speed at 925 hPa (knots)</div>
+  <div id="wv-legend-title" class="wv-legend-title"></div>
   <div id="wv-legend-bar"></div>
   <div id="wv-legend-ticks"></div>
 </div>
 
-<div id="wv-credit">ECMWF open data, CC BY 4.0 &middot; arrows point where the wind blows to</div>
+<div id="wv-readout" class="wv-panel" hidden></div>
+<div id="wv-status" class="wv-panel" hidden></div>
+<div id="wv-credit">ECMWF open data, CC BY 4.0 &middot; arrows and streamlines follow the wind direction</div>

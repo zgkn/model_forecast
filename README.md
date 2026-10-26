@@ -1,20 +1,36 @@
 # model_forecast
 
-Interactive map of the **925 hPa wind over southeast Asia** (98-120E, 6S-8N) from the latest ECMWF open-data forecast,
-one tab per model (**IFS** and **AIFS**), with a time slider over every forecast step.
+Interactive forecast map of **southeast Asia** (90-128E, 12S-30N) from the latest ECMWF open data, one tab per
+model (**IFS** and **AIFS**), with a time slider over every forecast step.
 
 ```
 pip install -r requirements.txt
-python wind_forecast.py            # -> output/wind925.html
+python wind_forecast.py                  # -> output/index.html (+ output/data/)
+python -m http.server -d output          # then open http://localhost:8000
 ```
 
-Open `output/wind925.html` in a browser (it needs internet for the Leaflet library and map tiles).
+The page loads its data with `fetch()`, so it has to be served over HTTP (opening the file directly does not work).
+It also needs internet for the Leaflet library and the map tiles.
 
-* Finds the newest published 00/06/12/18 UTC run of each model and downloads only u/v at 925 hPa
-  (one small GRIB per step), then keeps just the cropped region in `cache/` (see below).
-* Colour = wind speed in knots (5-kt bins, 50+ kt over-range), one scale for all frames and both models; arrows = direction and strength.
-* Speed field is cubic-interpolated from the 0.25 degree grid to ~0.03 degrees.
-* Switching tab keeps the current valid time (nearest step). Play/pause, slider, and left/right arrow keys step through time.
+## What you can show
+
+* **Shading** (one at a time): wind speed at 925 / 850 / 700 hPa, rain, relative humidity at 700 hPa.
+* **Flow** (independent of the shading): 925 / 850 / 700 hPa wind as **arrows**, **streamlines**, or off.
+* Wind speed uses your knots colour scale (5-kt bins). Rain is the amount in the preceding model step interval:
+  **3 h for IFS, 6 h for AIFS** (IFS steps beyond +144 h are 6-hourly). Humidity is computed from specific humidity
+  and temperature for both models (AIFS has no relative humidity field).
+* Switching tab keeps the current valid time (nearest step). Play/pause, the slider and left/right arrow keys step
+  through time. Hovering shows the values under the cursor.
+
+## How it stays fast
+
+* Each model and variable is a separate small binary file (`output/data/<model>_<run>_<var>.bin.gz`) loaded only
+  when selected; the page itself is ~35 KB. A wind level is ~2.4 MB for IFS and ~1 MB for AIFS (gzip), humidity and
+  rain a few hundred KB.
+* The browser draws the fields itself from the raw grid (shading, arrows, streamlines on canvas layers), so there are
+  no per-frame images to decode and changing a frame takes a few milliseconds.
+
+## Options
 
 | option | default | |
 |---|---|---|
@@ -24,23 +40,15 @@ Open `output/wind925.html` in a browser (it needs internet for the Leaflet libra
 | `--cache-dir` | `cache/` | where the cropped data is kept |
 | `--no-fetch` / `--fetch-only` | | build from the cache only / refresh the cache only |
 | `--source aws` | aws | open-data mirror: `aws`, `google`, `azure`, `ecmwf` |
-| `--out` | `output/wind925.html` | |
+| `--out` | `output/index.html` | |
 
-Steps: IFS every 3 h (6 h after +144 h on 00/12 UTC runs); AIFS every 6 h.
-The page is small (roughly 0.05 MB per step).
-The region is set by `LAT_N/LAT_S/LON_W/LON_E` at the top of `wind_forecast.py`.
-
-Data: ECMWF open data, CC BY 4.0.
-
-## Files
-
-* `wind_forecast.py` - download, processing, and page assembly
-* `viewer.html`, `viewer.css`, `viewer.js` - the UI that is inlined into the Folium page
-* `coastlines.geojson`, `tools/make_coastlines.mjs` - bundled coastline/border data and its generator
+Steps: IFS every 3 h (6 h after +144 h on 00/12 UTC runs); AIFS every 6 h. The region is set by
+`LAT_N/LAT_S/LON_W/LON_E` at the top of `wind_forecast.py` (regenerate `coastlines.geojson` with
+`tools/make_coastlines.mjs` after changing it).
 
 ## Data cache (the `data` branch)
 
-Downloading a run takes minutes, so the cropped region (u/v at 925 hPa, int16, ~0.8 MB for both models) is kept in
+Downloading a run takes a while, so the cropped region (int16, ~16 MB for both models) is kept in
 `cache/<model>_<run>.npz`. When a newer run exists the old file is deleted. In CI the cache lives on the `data`
 branch: a single commit that the workflow force-pushes whenever there is a new run, so the history never grows.
 
@@ -48,16 +56,13 @@ For development, get the data without touching ECMWF:
 
 ```
 git clone --depth 1 --branch data https://github.com/zgkn/model_forecast cache
-python wind_forecast.py --no-fetch        # builds output/wind925.html from the cache in a few seconds
+python wind_forecast.py --no-fetch        # builds the site from the cache in seconds
 ```
-
-`python wind_forecast.py --fetch-only` refreshes the cache; a plain `python wind_forecast.py` does both (and only
-downloads when the cached run is not the latest).
 
 ## Publishing (GitHub Pages)
 
 `.github/workflows/pages.yml` runs four times a day (02:30, 08:30, 14:30, 20:30 UTC, after each ECMWF run is
-released). It loads the `data` branch, downloads only if ECMWF has a newer run, rebuilds the page, refreshes the
+released). It loads the `data` branch, downloads only if ECMWF has a newer run, rebuilds the site, refreshes the
 `data` branch, and deploys to GitHub Pages. A scheduled run that finds the live page (`runs.json`) already showing
 the newest runs does not redeploy. Pushes to any branch build only; the default branch also deploys and writes
 `data`. One-time setup: repository **Settings -> Pages -> Source: GitHub Actions**. Scheduled workflows only run
@@ -66,5 +71,12 @@ from the default branch.
 ## Map data
 
 * Background tiles: Esri World Light Gray (or OpenStreetMap, layer control top right).
-* Coastlines and borders are drawn from `coastlines.geojson` (Natural Earth 10m, public domain), so they show
-  even if tiles fail. Regenerate with `tools/make_coastlines.mjs`.
+* Coastlines and borders: `coastlines.geojson` (Natural Earth 10m, public domain), drawn by the page so they show
+  even if tiles fail.
+* Weather data: ECMWF open data, CC BY 4.0.
+
+## Files
+
+* `wind_forecast.py` - download, cache and site build
+* `viewer.html`, `viewer.css`, `viewer.js` - the UI that is inlined into the Folium page
+* `coastlines.geojson`, `tools/make_coastlines.mjs` - coastline/border data and its generator

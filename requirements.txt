@@ -4,7 +4,4 @@ cfgrib
 eccodes
 folium
 numpy
-pillow
-matplotlib
 requests
-scipy

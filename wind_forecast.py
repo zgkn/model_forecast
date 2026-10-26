@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Interactive 925 hPa wind map over southeast Asia from the latest ECMWF open-data runs (IFS and AIFS).
+"""Interactive southeast-Asia forecast map (winds, rain, humidity) from ECMWF open data (IFS and AIFS).
 
-Downloads u/v at 925 hPa for every forecast step of the latest 00/06/12/18 UTC
-run of each model, crops them to the region and keeps them in a small cache file
-(cache/<model>_<run>.npz; older runs of the model are deleted). Then writes one
-self-contained Folium HTML page with a tab per model and a time slider.
+For the latest 00/06/12/18 UTC run of each model it fetches, per forecast step,
+u/v at 925/850/700 hPa, q/t at 700 hPa (-> relative humidity) and total precipitation,
+crops them to the region and keeps them in a small cache file (cache/<model>_<run>.npz;
+older runs of the model are deleted). Then it writes a static site: a Folium page plus
+compact binary data files (one per model and variable) that the page loads on demand
+and draws on canvas layers (shading, arrows, streamlines).
 
     python wind_forecast.py                    # latest run (download only if not cached), steps up to +144 h
     python wind_forecast.py --no-fetch         # build from whatever is in the cache, no network to ECMWF
@@ -12,12 +14,13 @@ self-contained Folium HTML page with a tab per model and a time slider.
     python wind_forecast.py --max-step 240     # longer range (00/12 UTC IFS runs)
     python wind_forecast.py --models ifs       # a single model
     python wind_forecast.py --source google    # other open-data mirror
+
+The page loads its data with fetch(), so open it through a web server, e.g.
+    python -m http.server -d output
 """
 import argparse
-import base64
-import io
+import gzip
 import json
-import math
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -30,22 +33,45 @@ import requests
 import xarray as xr
 from branca.element import Element
 from ecmwf.opendata import Client
-from PIL import Image
-from scipy.ndimage import map_coordinates
 
 HERE = Path(__file__).resolve().parent
-LEVEL = 925
-# Region (same box as the reference figure): 98-120E, 6S-8N
-LAT_N, LAT_S, LON_W, LON_E = 8.0, -6.0, 98.0, 120.0
+LEVELS = [925, 850, 700]  # wind levels (hPa); humidity is taken at RH_LEVEL
+RH_LEVEL = 700
+# Region: 90-128E, 12S-30N
+LAT_N, LAT_S, LON_W, LON_E = 30.0, -12.0, 90.0, 128.0
 STEP = 0.25  # source grid spacing in degrees
-REGION = [LAT_N, LAT_S, LON_W, LON_E, STEP]  # stored in cache files to detect a changed region
-RASTER_WIDTH = 704  # speed image width in px (~0.03 degree, cubic-interpolated)
-KT = 1.943844  # m/s -> knots
+NY = round((LAT_N - LAT_S) / STEP) + 1
+NX = round((LON_E - LON_W) / STEP) + 1
+FORMAT = 2  # bump when the cache layout changes
+REGION = [LAT_N, LAT_S, LON_W, LON_E, STEP, FORMAT]  # stored in cache files to detect changes
 
-# colour scale in knots: 5-kt bins, last colour is the over-range (>50 kt) extension
-EDGES = list(range(5, 51, 5))
-COLORS = ["#ffffff", "#d3ebea", "#a8cbe0", "#b6d99d", "#5fc45f", "#efe153",
-          "#f3a35a", "#d9544f", "#b01c2e", "#d86fae", "#e9d6ee"]
+# Colour scales: class i is value >= edges[i-1] (class 0 is below the first edge).
+PALETTES = {
+    # knots, taken from the reference figure
+    "speed": {
+        "unit": "knots",
+        "edges": list(range(5, 51, 5)),
+        "colors": ["#ffffff", "#d3ebea", "#a8cbe0", "#b6d99d", "#5fc45f", "#efe153",
+                   "#f3a35a", "#d9544f", "#b01c2e", "#d86fae", "#e9d6ee"],
+        "alpha": [0.16] + [0.72] * 10,
+    },
+    # mm in the preceding model interval (3 h for IFS, 6 h for AIFS)
+    "rain": {
+        "unit": "mm",
+        "edges": [0.5, 1, 2, 5, 10, 20, 30, 50],
+        "colors": ["#ffffff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#3182bd",
+                   "#08519c", "#6a51a3", "#3f007d"],
+        "alpha": [0.0] + [0.75] * 8,
+    },
+    # %
+    "rh": {
+        "unit": "%",
+        "edges": [20, 30, 40, 50, 60, 70, 80, 90],
+        "colors": ["#8c510a", "#bf812d", "#dfc27d", "#f6e8c3", "#f5f5f5",
+                   "#c7eae5", "#80cdc1", "#35978f", "#01665e"],
+        "alpha": [0.7] * 9,
+    },
+}
 
 MODELS = {
     "ifs": {"client_model": "ifs", "label": "IFS", "long": "ECMWF IFS (HRES, 0.25°)"},
@@ -64,29 +90,70 @@ def candidate_steps(model, hour, max_step):
     return [s for s in steps if s <= max_step]
 
 
-def fetch_step(client, run, step, target):
-    if target.exists() and target.stat().st_size > 0:
-        return target
-    try:
-        client.retrieve(
-            type="fc", stream="oper", levtype="pl", levelist=LEVEL, param=["u", "v"],
-            date=run.strftime("%Y%m%d"), time=run.hour, step=step, target=str(target),
-        )
-    except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code in (403, 404):
-            return None  # step not published for this run
-        raise
-    return target
+# ---- download ----------------------------------------------------------------------------------
+
+def fetch_step(client, run, step, tmp):
+    """Download the GRIBs of one step; None when the step is not published (yet)."""
+    base = dict(type="fc", stream="oper", date=run.strftime("%Y%m%d"), time=run.hour, step=step)
+    jobs = {
+        "uv": dict(levtype="pl", levelist=LEVELS, param=["u", "v"]),
+        "qt": dict(levtype="pl", levelist=RH_LEVEL, param=["q", "t"]),
+        "tp": dict(levtype="sfc", param="tp"),
+    }
+    files = {}
+    for name, req in jobs.items():
+        target = Path(tmp) / f"{name}{step:03d}.grib2"
+        try:
+            client.retrieve(**base, **req, target=str(target))
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code in (403, 404):
+                return None
+            raise
+        files[name] = target
+    return files
 
 
 def latest_run(model, source, max_step):
     """Newest run of the model that has already published its (capped) steps."""
-    # the client's default is 500 retries 120 s apart: one transient error would stall a download for minutes
-    client = Client(source=source, model=MODELS[model]["client_model"], maximum_retries=8, retry_after=5)
+    # the client's default is 500 retries 120 s apart; S3 answers "503 Slow Down" under load, so retry fast
+    client = Client(source=source, model=MODELS[model]["client_model"], maximum_retries=12, retry_after=5)
     run = client.latest(type="fc", stream="oper", step=min(max_step, 144), param="u",
-                        levtype="pl", levelist=LEVEL)
+                        levtype="pl", levelist=LEVELS[0])
     return client, run
 
+
+def open_region(path):
+    """Dataset cropped to the region, rows north -> south, columns west -> east."""
+    ds = xr.open_dataset(path, engine="cfgrib", backend_kwargs={"indexpath": ""})
+    ds = ds.sortby("latitude", ascending=False)
+    return ds.sel(latitude=slice(LAT_N, LAT_S), longitude=slice(LON_W, LON_E))
+
+
+def relative_humidity(q, t, p_hpa):
+    """RH (%) over water from specific humidity (kg/kg) and temperature (K)."""
+    tc = t - 273.15
+    es = 6.112 * np.exp(17.67 * tc / (tc + 243.5))  # hPa
+    e = q * p_hpa / (0.622 + 0.378 * q)
+    return np.clip(100 * e / es, 0, 100)
+
+
+def read_step(files):
+    """u, v (3, ny, nx) m/s, rh (ny, nx) %, accumulated rain (ny, nx) mm for one step."""
+    with open_region(files["uv"]) as ds:
+        ds = ds.sel(isobaricInhPa=LEVELS)
+        u, v = ds.u.values.astype("float32"), ds.v.values.astype("float32")
+    with open_region(files["qt"]) as ds:
+        rh = relative_humidity(ds.q.values.astype("float32"), ds.t.values.astype("float32"), RH_LEVEL)
+    with open_region(files["tp"]) as ds:
+        tp = ds.tp.values.astype("float32")
+        tp = tp * 1000 if ds.tp.attrs.get("units") == "m" else tp  # IFS: m, AIFS: kg m-2 (= mm)
+    for a in (u, v):
+        assert a.shape == (len(LEVELS), NY, NX), a.shape
+    assert rh.shape == tp.shape == (NY, NX), (rh.shape, tp.shape)
+    return u, v, rh, tp
+
+
+# ---- cache -------------------------------------------------------------------------------------
 
 def cache_file(cache_dir, model, run):
     return cache_dir / f"{model}_{run:%Y%m%d%H}.npz"
@@ -102,20 +169,22 @@ def newest_cached(cache_dir, model):
     return files[-1] if files else None
 
 
-def save_cache(path, steps, u, v, max_step):
-    """u, v as int16 in 0.01 m/s, shape (steps, lat, lon); tiny (~1 MB per model and run)."""
+def save_cache(path, steps, u, v, rh, tp, max_step):
+    """int16 fields: wind 0.01 m/s, rh 0.1 %, accumulated rain 0.1 mm."""
     np.savez_compressed(
         path, steps=np.array(steps, "int16"), max_step=max_step, region=np.array(REGION),
-        u=np.round(u * 100).astype("int16"), v=np.round(v * 100).astype("int16"))
+        u=np.round(u * 100).astype("int16"), v=np.round(v * 100).astype("int16"),
+        rh=np.round(rh * 10).astype("int16"), tp=np.clip(np.round(tp * 10), 0, 32767).astype("int16"))
 
 
 def load_cache(path):
-    """Cached fields, or None when the file was written for a different region."""
+    """Cached fields in physical units, or None when written for another region/layout."""
     z = np.load(path)
     if not np.array_equal(z["region"], REGION):
         return None
     return {"steps": z["steps"].tolist(), "max_step": int(z["max_step"]),
-            "u": z["u"].astype("float32") / 100, "v": z["v"].astype("float32") / 100}
+            "u": z["u"].astype("float32") / 100, "v": z["v"].astype("float32") / 100,
+            "rh": z["rh"].astype("float32") / 10, "tp": z["tp"].astype("float32") / 10}
 
 
 def prune_cache(cache_dir, model, keep):
@@ -139,89 +208,62 @@ def fetch_model(model, source, max_step, cache_dir, workers):
     steps = candidate_steps(model, run.hour, max_step)
     print(f"[{model}] run {run:%Y-%m-%d %H}Z, downloading {len(steps)} steps", flush=True)
     with tempfile.TemporaryDirectory() as tmp:
-        files = list(ThreadPoolExecutor(workers).map(
-            lambda s: fetch_step(client, run, s, Path(tmp) / f"step{s:03d}.grib2"), steps))
+        with ThreadPoolExecutor(workers) as pool:
+            files = list(pool.map(lambda s: fetch_step(client, run, s, tmp), steps))
         got = [(s, f) for s, f in zip(steps, files) if f is not None]
         if not got:
             sys.exit(f"no steps available for {model}")
-        fields = [read_uv(f) for _, f in got]
+        fields = [read_step(f) for _, f in got]
     cache_dir.mkdir(parents=True, exist_ok=True)
-    save_cache(path, [s for s, _ in got], np.stack([f[0] for f in fields]),
-               np.stack([f[1] for f in fields]), max_step)
+    u, v, rh, tp = (np.stack([f[i] for f in fields]) for i in range(4))
+    save_cache(path, [s for s, _ in got], u, v, rh, tp, max_step)
     prune_cache(cache_dir, model, path)
     print(f"[{model}] cached -> {path} ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
     return path
 
 
-def read_uv(path):
-    """u, v (m/s) cropped to the region, rows north -> south, columns west -> east."""
-    with xr.open_dataset(path, engine="cfgrib", backend_kwargs={"indexpath": ""}) as ds:
-        ds = ds.sortby("latitude", ascending=False)
-        ds = ds.sel(latitude=slice(LAT_N, LAT_S), longitude=slice(LON_W, LON_E))
-        shape = (round((LAT_N - LAT_S) / STEP) + 1, round((LON_E - LON_W) / STEP) + 1)
-        assert ds.u.shape == shape, ds.u.shape
-        return ds.u.values.astype("float32"), ds.v.values.astype("float32")
+# ---- site --------------------------------------------------------------------------------------
+
+def gz(arr):
+    return gzip.compress(np.ascontiguousarray(arr).tobytes(), 9, mtime=0)
 
 
-def merc_y(lat):
-    return math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
-
-
-def speed_image(u, v):
-    """Wind speed in knots, binned to the colour scale, as a lossless WebP data URI.
-
-    Rows are spaced uniformly in web-mercator y so Leaflet can stretch the image
-    over the region bounds; the field is cubic-interpolated from the 0.25 degree grid.
-    """
-    kt = np.hypot(u, v) * KT
-    y_n, y_s = merc_y(LAT_N), merc_y(LAT_S)
-    height = round(RASTER_WIDTH * (y_n - y_s) / math.radians(LON_E - LON_W))
-    y = np.linspace(y_n, y_s, height)
-    lat = np.degrees(2 * np.arctan(np.exp(y)) - math.pi / 2)
-    lon = np.linspace(LON_W, LON_E, RASTER_WIDTH)
-    rows, cols = np.meshgrid((LAT_N - lat) / STEP, (lon - LON_W) / STEP, indexing="ij")
-    field = map_coordinates(kt, [rows, cols], order=3, mode="nearest")
-    palette = np.array([[int(c[i:i + 2], 16) for i in (1, 3, 5)] + [184] for c in COLORS], dtype="uint8")
-    palette[0, 3] = 40  # <5 kt: nearly transparent so the basemap shows
-    rgba = palette[np.digitize(field, EDGES)]
-    buf = io.BytesIO()
-    Image.fromarray(rgba, "RGBA").save(buf, "WEBP", lossless=True, method=6)
-    return "data:image/webp;base64," + base64.b64encode(buf.getvalue()).decode()
-
-
-def arrow_grid(u, v):
-    """u, v on the source grid as int16 in 0.1 m/s, base64 (u block, then v block)."""
-    uv = np.round(np.concatenate([u.ravel(), v.ravel()]) * 10).astype("<i2")
-    return base64.b64encode(uv.tobytes()).decode()
-
-
-def build_model_data(model, path, max_step):
+def write_model(model, path, max_step, data_dir):
+    """Write the model's binary data files; return its manifest entry."""
     run, cached = run_of(path), load_cache(path)
     if cached is None:
-        sys.exit(f"{path} was written for another region; refresh the cache")
-    frames = []
-    for i, step in enumerate(cached["steps"]):
-        if step > max_step:
-            continue
-        u, v = cached["u"][i], cached["v"][i]
-        frames.append({
-            "step": step,
-            "valid": int(run.timestamp()) + step * 3600,
-            "img": speed_image(u, v),
-            "uv": arrow_grid(u, v),
-        })
-        print(f"[{model}] +{step:>3d} h processed", flush=True)
+        sys.exit(f"{path} was written for another region/layout; refresh the cache")
+    keep = [i for i, s in enumerate(cached["steps"]) if s <= max_step]
+    steps = [cached["steps"][i] for i in keep]
+    u, v, rh, tp = (cached[k][keep] for k in ("u", "v", "rh", "tp"))
+    tag = f"{model}_{run:%Y%m%d%H}"
+    files = {}
+
+    for li, level in enumerate(LEVELS):  # (steps, 2, ny, nx) int16, 0.1 m/s
+        uv = np.stack([u[:, li], v[:, li]], axis=1)
+        files[f"uv{level}"] = f"data/{tag}_uv{level}.bin.gz"
+        (data_dir / f"{tag}_uv{level}.bin.gz").write_bytes(gz(np.round(uv * 10).astype("<i2")))
+
+    files[f"rh{RH_LEVEL}"] = f"data/{tag}_rh{RH_LEVEL}.bin.gz"  # (steps, ny, nx) uint8, 1 %
+    (data_dir / f"{tag}_rh{RH_LEVEL}.bin.gz").write_bytes(gz(np.round(rh).astype("uint8")))
+
+    # rain in the preceding model interval (3 h IFS, 6 h AIFS; first step has none): uint16, 0.1 mm
+    rain = np.clip(np.diff(tp, axis=0, prepend=tp[:1]), 0, None)
+    files["rain"] = f"data/{tag}_rain.bin.gz"
+    (data_dir / f"{tag}_rain.bin.gz").write_bytes(gz(np.round(rain * 10).astype("<u2")))
+
     return {
-        "label": MODELS[model]["label"],
-        "long": MODELS[model]["long"],
-        "run": int(run.timestamp()),
-        "frames": frames,
+        "label": MODELS[model]["label"], "long": MODELS[model]["long"],
+        "run": int(run.timestamp()), "steps": steps,
+        "valid": [int(run.timestamp()) + s * 3600 for s in steps],
+        "interval": [0] + [b - a for a, b in zip(steps, steps[1:])],
+        "files": files,
     }
 
 
-def build_map(data, out_path):
+def build_site(manifest, out_path):
     m = folium.Map(
-        location=[(LAT_N + LAT_S) / 2, (LON_W + LON_E) / 2], zoom_start=6, min_zoom=4, max_zoom=10,
+        location=[(LAT_N + LAT_S) / 2, (LON_W + LON_E) / 2], zoom_start=5, min_zoom=4, max_zoom=10,
         tiles=None, zoom_control=True, zoom_snap=0.25,
         min_lat=LAT_S - 10, max_lat=LAT_N + 10, min_lon=LON_W - 10, max_lon=LON_E + 10, max_bounds=True,
     )
@@ -233,19 +275,11 @@ def build_map(data, out_path):
     folium.TileLayer("OpenStreetMap", name="OpenStreetMap", no_wrap=True, show=False).add_to(m)
     folium.LayerControl(position="topright", collapsed=True).add_to(m)
     m.fit_bounds([[LAT_S, LON_W], [LAT_N, LON_E]])
-    m.get_root().header.add_child(Element("<title>ECMWF 925 hPa wind</title>"))
+    m.get_root().header.add_child(Element("<title>ECMWF forecast, southeast Asia</title>"))
     m.get_root().header.add_child(Element(f"<style>{(HERE / 'viewer.css').read_text()}</style>"))
     m.get_root().html.add_child(Element((HERE / "viewer.html").read_text()))
     js = (HERE / "viewer.js").read_text()
-    js = (js.replace("__MAP__", m.get_name())
-            .replace("__DATA__", json.dumps(data, separators=(",", ":")))
-            .replace("__GRID__", json.dumps({
-                "lat0": LAT_N, "lon0": LON_W, "d": STEP,
-                "nlat": round((LAT_N - LAT_S) / STEP) + 1, "nlon": round((LON_E - LON_W) / STEP) + 1,
-                "bounds": [[LAT_S, LON_W], [LAT_N, LON_E]]}))
-            .replace("__COAST__", (HERE / "coastlines.geojson").read_text())
-            .replace("__COLORS__", json.dumps(COLORS))
-            .replace("__EDGES__", json.dumps(EDGES)))
+    js = js.replace("__MAP__", m.get_name()).replace("__MANIFEST__", json.dumps(manifest, separators=(",", ":")))
     m.get_root().script.add_child(Element(js))
     m.save(str(out_path))
 
@@ -260,7 +294,7 @@ def main():
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--no-fetch", action="store_true", help="never contact ECMWF; use the newest cached run")
     mode.add_argument("--fetch-only", action="store_true", help="refresh the cache and stop")
-    ap.add_argument("--out", type=Path, default=HERE / "output" / "wind925.html")
+    ap.add_argument("--out", type=Path, default=HERE / "output" / "index.html")
     args = ap.parse_args()
 
     paths = {}
@@ -274,13 +308,23 @@ def main():
     if args.fetch_only:
         return
 
-    data = {m: build_model_data(m, p, args.max_step) for m, p in paths.items()}
+    site = args.out.parent
+    data_dir = site / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for old in data_dir.glob("*.bin.gz"):
+        old.unlink()
+    manifest = {
+        "grid": {"lat0": LAT_N, "lon0": LON_W, "d": STEP, "nlat": NY, "nlon": NX,
+                 "bounds": [[LAT_S, LON_W], [LAT_N, LON_E]]},
+        "levels": LEVELS, "rhLevel": RH_LEVEL, "palettes": PALETTES,
+        "models": {m: write_model(m, p, args.max_step, data_dir) for m, p in paths.items()},
+    }
+    (data_dir / "coastlines.json").write_text((HERE / "coastlines.geojson").read_text())
+    build_site(manifest, args.out)
     runs = {m: p.stem.split("_")[1] for m, p in paths.items()}
-
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    build_map(data, args.out)
-    (args.out.parent / "runs.json").write_text(json.dumps(runs, sort_keys=True))
-    print(f"wrote {args.out} ({args.out.stat().st_size / 1e6:.1f} MB)")
+    (site / "runs.json").write_text(json.dumps(runs, sort_keys=True))
+    total = sum(f.stat().st_size for f in site.rglob("*") if f.is_file())
+    print(f"wrote {args.out} + {len(list(data_dir.iterdir()))} data files ({total / 1e6:.1f} MB total)")
 
 
 if __name__ == "__main__":
