@@ -33,3 +33,10 @@ Data: ECMWF open data, CC BY 4.0.
 
 * `wind_forecast.py` - download, processing, and page assembly
 * `viewer.html`, `viewer.css`, `viewer.js` - the UI that is inlined into the Folium page
+
+## Publishing (GitHub Pages)
+
+`.github/workflows/pages.yml` rebuilds the page four times a day (08:30, 14:30, 20:30, 02:30 UTC, after each
+ECMWF run is released) and deploys it to GitHub Pages. Pushes to any branch run the build only.
+One-time setup: repository **Settings -> Pages -> Source: GitHub Actions**. Scheduled workflows only run from
+the default branch, so the workflow must be merged there.

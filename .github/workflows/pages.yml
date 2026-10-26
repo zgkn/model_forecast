@@ -1,0 +1,59 @@
+name: Build and publish wind map
+
+on:
+  schedule:
+    # ECMWF open data appears ~6-9 h after the 00/06/12/18 UTC run time;
+    # the script picks the newest run that is complete, so these just need to follow the releases.
+    - cron: "30 8,14,20,2 * * *"
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths-ignore: ["README.md"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Build wind map
+        run: python wind_forecast.py --out site/index.html
+
+      - name: Check output
+        run: |
+          test "$(grep -o '"step":' site/index.html | wc -l)" -ge 10
+          ls -l site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    # only the default branch publishes; other branches just prove the build works
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
