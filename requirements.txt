@@ -1,0 +1,10 @@
+ecmwf-opendata
+xarray
+cfgrib
+eccodes
+folium
+numpy
+pillow
+matplotlib
+requests
+scipy
