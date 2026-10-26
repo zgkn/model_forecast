@@ -2,10 +2,13 @@
 """Interactive 925 hPa wind map over southeast Asia from the latest ECMWF open-data runs (IFS and AIFS).
 
 Downloads u/v at 925 hPa for every forecast step of the latest 00/06/12/18 UTC
-run of each model, and writes one self-contained Folium HTML page with a tab per
-model and a time slider over the forecast steps.
+run of each model, crops them to the region and keeps them in a small cache file
+(cache/<model>_<run>.npz; older runs of the model are deleted). Then writes one
+self-contained Folium HTML page with a tab per model and a time slider.
 
-    python wind_forecast.py                    # latest run, steps up to +144 h
+    python wind_forecast.py                    # latest run (download only if not cached), steps up to +144 h
+    python wind_forecast.py --no-fetch         # build from whatever is in the cache, no network to ECMWF
+    python wind_forecast.py --fetch-only       # just refresh the cache
     python wind_forecast.py --max-step 240     # longer range (00/12 UTC IFS runs)
     python wind_forecast.py --models ifs       # a single model
     python wind_forecast.py --source google    # other open-data mirror
@@ -16,7 +19,9 @@ import io
 import json
 import math
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
 import folium
@@ -33,6 +38,7 @@ LEVEL = 925
 # Region (same box as the reference figure): 98-120E, 6S-8N
 LAT_N, LAT_S, LON_W, LON_E = 8.0, -6.0, 98.0, 120.0
 STEP = 0.25  # source grid spacing in degrees
+REGION = [LAT_N, LAT_S, LON_W, LON_E, STEP]  # stored in cache files to detect a changed region
 RASTER_WIDTH = 704  # speed image width in px (~0.03 degree, cubic-interpolated)
 KT = 1.943844  # m/s -> knots
 
@@ -75,32 +81,86 @@ def fetch_step(client, run, step, target):
 
 def latest_run(model, source, max_step):
     """Newest run of the model that has already published its (capped) steps."""
-    client = Client(source=source, model=MODELS[model]["client_model"])
+    # the client's default is 500 retries 120 s apart: one transient error would stall a download for minutes
+    client = Client(source=source, model=MODELS[model]["client_model"], maximum_retries=8, retry_after=5)
     run = client.latest(type="fc", stream="oper", step=min(max_step, 144), param="u",
                         levtype="pl", levelist=LEVEL)
     return client, run
 
 
-def download(model, source, max_step, data_dir, workers):
+def cache_file(cache_dir, model, run):
+    return cache_dir / f"{model}_{run:%Y%m%d%H}.npz"
+
+
+def run_of(path):
+    """Run time (UTC) encoded in a cache file name."""
+    return datetime.strptime(path.stem.split("_")[1], "%Y%m%d%H").replace(tzinfo=timezone.utc)
+
+
+def newest_cached(cache_dir, model):
+    files = sorted(cache_dir.glob(f"{model}_*.npz"))
+    return files[-1] if files else None
+
+
+def save_cache(path, steps, u, v, max_step):
+    """u, v as int16 in 0.01 m/s, shape (steps, lat, lon); tiny (~1 MB per model and run)."""
+    np.savez_compressed(
+        path, steps=np.array(steps, "int16"), max_step=max_step, region=np.array(REGION),
+        u=np.round(u * 100).astype("int16"), v=np.round(v * 100).astype("int16"))
+
+
+def load_cache(path):
+    """Cached fields, or None when the file was written for a different region."""
+    z = np.load(path)
+    if not np.array_equal(z["region"], REGION):
+        return None
+    return {"steps": z["steps"].tolist(), "max_step": int(z["max_step"]),
+            "u": z["u"].astype("float32") / 100, "v": z["v"].astype("float32") / 100}
+
+
+def prune_cache(cache_dir, model, keep):
+    """Delete the model's cache files of older runs."""
+    for old in cache_dir.glob(f"{model}_*.npz"):
+        if old != keep:
+            old.unlink()
+            print(f"[{model}] removed old cache {old.name}", flush=True)
+
+
+def fetch_model(model, source, max_step, cache_dir, workers):
+    """Make sure the cache holds the latest run of the model; return its cache file."""
     client, run = latest_run(model, source, max_step)
+    path = cache_file(cache_dir, model, run)
+    if path.exists():
+        cached = load_cache(path)
+        if cached and cached["max_step"] >= max_step:
+            print(f"[{model}] run {run:%Y-%m-%d %H}Z already cached", flush=True)
+            prune_cache(cache_dir, model, path)
+            return path
     steps = candidate_steps(model, run.hour, max_step)
-    out = data_dir / f"{model}_{run:%Y%m%d%H}"
-    out.mkdir(parents=True, exist_ok=True)
-    print(f"[{model}] run {run:%Y-%m-%d %H}Z, {len(steps)} steps -> {out}", flush=True)
-    with ThreadPoolExecutor(workers) as pool:
-        files = list(pool.map(
-            lambda s: fetch_step(client, run, s, out / f"step{s:03d}.grib2"), steps))
-    return run, [(s, f) for s, f in zip(steps, files) if f is not None]
+    print(f"[{model}] run {run:%Y-%m-%d %H}Z, downloading {len(steps)} steps", flush=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        files = list(ThreadPoolExecutor(workers).map(
+            lambda s: fetch_step(client, run, s, Path(tmp) / f"step{s:03d}.grib2"), steps))
+        got = [(s, f) for s, f in zip(steps, files) if f is not None]
+        if not got:
+            sys.exit(f"no steps available for {model}")
+        fields = [read_uv(f) for _, f in got]
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    save_cache(path, [s for s, _ in got], np.stack([f[0] for f in fields]),
+               np.stack([f[1] for f in fields]), max_step)
+    prune_cache(cache_dir, model, path)
+    print(f"[{model}] cached -> {path} ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
+    return path
 
 
 def read_uv(path):
     """u, v (m/s) cropped to the region, rows north -> south, columns west -> east."""
-    ds = xr.open_dataset(path, engine="cfgrib", backend_kwargs={"indexpath": ""})
-    ds = ds.sortby("latitude", ascending=False)
-    ds = ds.sel(latitude=slice(LAT_N, LAT_S), longitude=slice(LON_W, LON_E))
-    shape = (round((LAT_N - LAT_S) / STEP) + 1, round((LON_E - LON_W) / STEP) + 1)
-    assert ds.u.shape == shape, ds.u.shape
-    return ds.u.values.astype("float32"), ds.v.values.astype("float32")
+    with xr.open_dataset(path, engine="cfgrib", backend_kwargs={"indexpath": ""}) as ds:
+        ds = ds.sortby("latitude", ascending=False)
+        ds = ds.sel(latitude=slice(LAT_N, LAT_S), longitude=slice(LON_W, LON_E))
+        shape = (round((LAT_N - LAT_S) / STEP) + 1, round((LON_E - LON_W) / STEP) + 1)
+        assert ds.u.shape == shape, ds.u.shape
+        return ds.u.values.astype("float32"), ds.v.values.astype("float32")
 
 
 def merc_y(lat):
@@ -135,14 +195,18 @@ def arrow_grid(u, v):
     return base64.b64encode(uv.tobytes()).decode()
 
 
-def build_model_data(model, run, step_files):
+def build_model_data(model, path, max_step):
+    run, cached = run_of(path), load_cache(path)
+    if cached is None:
+        sys.exit(f"{path} was written for another region; refresh the cache")
     frames = []
-    for step, path in step_files:
-        u, v = read_uv(path)
-        valid = run.timestamp() + step * 3600
+    for i, step in enumerate(cached["steps"]):
+        if step > max_step:
+            continue
+        u, v = cached["u"][i], cached["v"][i]
         frames.append({
             "step": step,
-            "valid": int(valid),
+            "valid": int(run.timestamp()) + step * 3600,
             "img": speed_image(u, v),
             "uv": arrow_grid(u, v),
         })
@@ -191,25 +255,27 @@ def main():
     ap.add_argument("--models", nargs="+", choices=list(MODELS), default=list(MODELS))
     ap.add_argument("--max-step", type=int, default=144, help="last forecast step in hours (default 144)")
     ap.add_argument("--source", default="aws", help="open-data mirror: aws, google, azure, ecmwf (default aws)")
-    ap.add_argument("--workers", type=int, default=12, help="parallel downloads (default 12)")
-    ap.add_argument("--print-runs", action="store_true",
-                    help="print the latest available run of each model as JSON and exit")
-    ap.add_argument("--data-dir", type=Path, default=HERE / "data")
+    ap.add_argument("--workers", type=int, default=8, help="parallel downloads (default 8)")
+    ap.add_argument("--cache-dir", type=Path, default=HERE / "cache", help="where the cropped data is kept")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--no-fetch", action="store_true", help="never contact ECMWF; use the newest cached run")
+    mode.add_argument("--fetch-only", action="store_true", help="refresh the cache and stop")
     ap.add_argument("--out", type=Path, default=HERE / "output" / "wind925.html")
     args = ap.parse_args()
 
-    if args.print_runs:
-        runs = {m: f"{latest_run(m, args.source, args.max_step)[1]:%Y%m%d%H}" for m in args.models}
-        print(json.dumps(runs, sort_keys=True))
+    paths = {}
+    for model in args.models:
+        if args.no_fetch:
+            paths[model] = newest_cached(args.cache_dir, model)
+            if paths[model] is None:
+                sys.exit(f"nothing cached for {model} in {args.cache_dir}")
+        else:
+            paths[model] = fetch_model(model, args.source, args.max_step, args.cache_dir, args.workers)
+    if args.fetch_only:
         return
 
-    data, runs = {}, {}
-    for model in args.models:
-        run, step_files = download(model, args.source, args.max_step, args.data_dir, args.workers)
-        runs[model] = f"{run:%Y%m%d%H}"
-        if not step_files:
-            sys.exit(f"no steps available for {model}")
-        data[model] = build_model_data(model, run, step_files)
+    data = {m: build_model_data(m, p, args.max_step) for m, p in paths.items()}
+    runs = {m: p.stem.split("_")[1] for m, p in paths.items()}
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     build_map(data, args.out)

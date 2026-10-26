@@ -11,47 +11,21 @@ on:
     paths-ignore: ["README.md"]
 
 permissions:
-  contents: read
+  contents: write   # the default branch refreshes the `data` branch (cropped ECMWF data)
 
 concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  check:
-    # Scheduled runs stop here when the published page already shows the newest ECMWF runs.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      build: ${{ steps.plan.outputs.build }}
-      key: ${{ steps.plan.outputs.key }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt
-      - id: plan
-        run: |
-          python wind_forecast.py --print-runs | jq -S -c . > latest.json
-          echo "latest: $(cat latest.json)"
-          echo "key=$(jq -r 'to_entries | map(.key + .value) | join("-")' latest.json)" >> "$GITHUB_OUTPUT"
-          build=true
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            url="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/runs.json"
-            if curl -fsS "$url" | jq -S -c . > published.json 2>/dev/null; then
-              echo "published: $(cat published.json)"
-              cmp -s latest.json published.json && build=false
-            fi
-          fi
-          echo "build=$build" >> "$GITHUB_OUTPUT"
+env:
+  IS_DEFAULT: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
+jobs:
   build:
-    needs: check
-    if: needs.check.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      changed: ${{ steps.plan.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
 
@@ -62,27 +36,61 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # GRIBs of one ECMWF run never change, so re-runs / code-only pushes reuse them
-      - uses: actions/cache@v4
-        with:
-          path: data
-          key: ecmwf-${{ needs.check.outputs.key }}
+      # The `data` branch holds the cropped data of the latest ECMWF run only (a single, force-pushed
+      # commit), so most builds download nothing.
+      - name: Load cached ECMWF data
+        run: |
+          mkdir cache && cd cache
+          git init -q
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          if git fetch -q --depth 1 origin data; then git checkout -q -B data FETCH_HEAD; fi
+          ls -l
 
-      - name: Build wind map
+      - name: Refresh cache (downloads only when ECMWF has a newer run) and build page
         run: python wind_forecast.py --out site/index.html
 
-      - name: Check output
+      - name: Update the data branch
+        if: env.IS_DEFAULT == 'true'
+        working-directory: cache
+        run: |
+          printf '%s\n' "Cropped ECMWF open data used by the wind map." \
+            "Automatically force-pushed by the workflow; only the latest run is kept." > README.md
+          git add -A
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git checkout -q --orphan latest
+            git add -A
+            git commit -q -m "ECMWF data: $(ls *.npz | tr '\n' ' ')"
+            git push -q --force origin latest:data
+          else
+            echo "data branch already up to date"
+          fi
+
+      - name: Check output and decide whether to publish
+        id: plan
         run: |
           test "$(grep -o '"step":' site/index.html | wc -l)" -ge 10
           ls -l site
+          changed=true
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            url="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/runs.json"
+            if curl -fsS "$url" | jq -S -c . > published.json 2>/dev/null &&
+               cmp -s published.json <(jq -S -c . site/runs.json); then
+              echo "published page already shows $(cat published.json)"
+              changed=false
+            fi
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-pages-artifact@v3
+        if: steps.plan.outputs.changed == 'true'
         with:
           path: site
 
   deploy:
     # only the default branch publishes; other branches just prove the build works
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: needs.build.outputs.changed == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     needs: build
     runs-on: ubuntu-latest
     permissions:
