@@ -194,9 +194,17 @@ def newest_cached(cache_dir, model):
     return files[-1] if files else None
 
 
+def save_npz(path, **arrays):
+    """Write an .npz atomically: a build killed half way must not leave a corrupt cache file."""
+    tmp = path.parent / (path.name + ".tmp")
+    with open(tmp, "wb") as f:
+        np.savez_compressed(f, **arrays)
+    os.replace(tmp, path)
+
+
 def save_cache(path, steps, u, v, rh, tp, max_step):
     """int16 fields: wind 0.01 m/s, rh 0.1 %, accumulated rain 0.1 mm."""
-    np.savez_compressed(
+    save_npz(
         path, steps=np.array(steps, "int16"), max_step=max_step, region=np.array(REGION),
         u=np.round(u * 100).astype("int16"), v=np.round(v * 100).astype("int16"),
         rh=np.round(rh * 10).astype("int16"), tp=np.clip(np.round(tp * 10), 0, 32767).astype("int16"))
@@ -306,8 +314,8 @@ def fetch_cdd(model, source, cache_dir, workers):
         if len(got) < cdd.MIN_DAYS + 1:
             raise RuntimeError(f"only {len(got)} midnight steps available for the {model} CDD run")
         cache_dir.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(path, steps=np.array([s for s, _ in got], "int16"), region=np.array(REGION),
-                            tp=np.clip(np.round(np.stack(tps) * 10), 0, 65535).astype("uint16"))
+        save_npz(path, steps=np.array([s for s, _ in got], "int16"), region=np.array(REGION),
+                 tp=np.clip(np.round(np.stack(tps) * 10), 0, 65535).astype("uint16"))
     for old in cache_dir.glob(f"cdd-{model}_*.npz"):
         if old != path:
             old.unlink()

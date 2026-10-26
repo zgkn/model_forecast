@@ -49,8 +49,15 @@ jobs:
           if git fetch -q --depth 1 origin data; then git checkout -q -B data FETCH_HEAD; fi
           ls -l
 
-      - name: Refresh cache (downloads only when ECMWF has a newer run) and build page
-        run: python wind_forecast.py --out site/index.html
+      # Time-boxed: ECMWF's server throttles right after a new run appears. If this step is slow or fails,
+      # the site is still built from the cached run below and a later scheduled run catches up.
+      - name: Refresh ECMWF data (downloads only when there is a newer run)
+        timeout-minutes: 12
+        continue-on-error: true
+        run: python wind_forecast.py --fetch-only
+
+      - name: Build site from the cache
+        run: python wind_forecast.py --no-fetch --out site/index.html
 
       - name: Update the data branch
         if: env.IS_DEFAULT == 'true'

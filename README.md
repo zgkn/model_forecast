@@ -96,8 +96,9 @@ python wind_forecast.py --no-fetch        # builds the site from the cache in se
 ## Publishing (GitHub Pages)
 
 `.github/workflows/pages.yml` runs four times a day (02:30, 08:30, 14:30, 20:30 UTC, after each ECMWF run is
-released). It loads the `data` branch, downloads only if ECMWF has a newer run, rebuilds the site, refreshes the
-`data` branch, and deploys to GitHub Pages. A scheduled run that finds the live page (`runs.json`) already showing
+released). It loads the `data` branch, refreshes the ECMWF data in a **time-boxed step** (12 min; ECMWF's server throttles
+right after a new run appears and a failure there is tolerated), builds the site from whatever the cache holds,
+updates the `data` branch, and deploys to GitHub Pages. A slow download therefore delays the newest data, never the deploy. A scheduled run that finds the live page (`runs.json`) already showing
 the newest runs does not redeploy. Pushes to any branch build only; the default branch also deploys and writes
 `data`. One-time setup: repository **Settings -> Pages -> Source: GitHub Actions**. Scheduled workflows only run
 from the default branch.
