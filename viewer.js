@@ -9,16 +9,22 @@ window.addEventListener("load", function () {
   var MIN_ARROW_PX = 22;                // thin the arrows out below this spacing
   var PLAY_MS = 450;
   var RAD = Math.PI / 180;
+  var CDD_LEVELS = [5, 10, 15];
 
   var el = function (id) { return document.getElementById(id); };
   var models = Object.keys(M.models);
-  var state = { model: models[0], t: 0, shade: "speed" + M.levels[0], level: M.levels[0], style: "arrows" };
+  var state = { model: models[0], t: 0, day: null, shade: "speed" + M.levels[0], prevShade: null,
+                level: M.levels[0], style: "arrows" };
   var timer = null;
 
   ["wv-top", "wv-bottom", "wv-legend"].forEach(function (id) {
     L.DomEvent.disableClickPropagation(el(id));
     L.DomEvent.disableScrollPropagation(el(id));
   });
+
+  function cddOf(m) { return M.models[m].cdd; }
+  function inCdd() { return state.shade === "cdd"; }
+  models.forEach(function (m) { if (cddOf(m)) M.models[m].files.cdd = cddOf(m).files.cdd; });
 
   // ---- data loading: one binary file per model and variable, fetched on demand -----------------
   var pending = {};   // "model/name" -> Promise
@@ -46,9 +52,10 @@ window.addEventListener("load", function () {
     return pending[key];
   }
 
-  function shadeKind() { return state.shade.indexOf("speed") === 0 ? "speed" : state.shade === "rain" ? "rain" : "rh"; }
+  function shadeKind() { return state.shade.indexOf("speed") === 0 ? "speed" : state.shade === "rain" ? "rain" : state.shade === "cdd" ? "cdd" : "rh"; }
   function shadeFile() { return state.shade === "rh" ? "rh" + M.rhLevel : state.shade; }
   function neededFiles() {
+    if (inCdd()) return ["cdd"];
     var f = [shadeFile().replace(/^speed/, "uv")];
     if (state.style !== "off") f.push("uv" + state.level);
     return f.filter(function (n, i) { return f.indexOf(n) === i; });
@@ -59,7 +66,7 @@ window.addEventListener("load", function () {
   var LUTS = {};
   function lut(kind) {
     if (LUTS[kind]) return LUTS[kind];
-    var P = M.palettes[kind], vmax = { speed: 150, rain: 300, rh: 100 }[kind], scale = { speed: 4, rain: 10, rh: 4 }[kind];
+    var P = M.palettes[kind], vmax = { speed: 150, rain: 300, rh: 100, cdd: 40 }[kind], scale = { speed: 4, rain: 10, rh: 4, cdd: 1 }[kind];
     var n = Math.ceil(vmax * scale) + 1, t = new Uint32Array(n);
     var rgba = P.colors.map(function (c, i) {
       var r = parseInt(c.substr(1, 2), 16), g = parseInt(c.substr(3, 2), 16), b = parseInt(c.substr(5, 2), 16);
@@ -98,11 +105,11 @@ window.addEventListener("load", function () {
     };
   }
   var shadeLayer = canvasLayer("wv-shade", 410);
+  map.createPane("wv-coast"); map.getPane("wv-coast").style.zIndex = 420;
+  map.createPane("wv-cdd"); map.getPane("wv-cdd").style.zIndex = 430;     // dry-spell outlines (clickable)
   var flowLayer = canvasLayer("wv-flow", 450);
 
   fetch("data/coastlines.json").then(function (r) { return r.json(); }).then(function (gj) {
-    map.createPane("wv-coast");
-    map.getPane("wv-coast").style.zIndex = 420;
     L.geoJSON(gj, { pane: "wv-coast", interactive: false,
       style: { color: "#1a1a19", weight: 1, opacity: 0.7, fill: false } }).addTo(map);
   });
@@ -127,23 +134,53 @@ window.addEventListener("load", function () {
   var off = document.createElement("canvas");
   off.width = OW; off.height = OH;
   var offCtx = off.getContext("2d"), offImg = offCtx.createImageData(OW, OH), offPx = new Uint32Array(offImg.data.buffer);
+
+  // consecutive dry days: one flat-coloured block per grid cell, bounds on the cell EDGES, so the
+  // raster matches the outlines (and no NaN ocean cell bleeds into the coast through interpolation)
+  var CS = 4, cOW = NX * CS, cLatN = LAT_N + G.d / 2, cLatS = LAT_S - G.d / 2;
+  var cYN = merc(cLatN), cYS = merc(cLatS);
+  var cOH = Math.round(cOW * (cYN - cYS) / (NX * G.d * RAD));
+  var cRow = new Int32Array(cOH);
+  for (var cy = 0; cy < cOH; cy++) {
+    var clat = (2 * Math.atan(Math.exp(cYN - (cy + 0.5) / cOH * (cYN - cYS))) - Math.PI / 2) / RAD;
+    cRow[cy] = Math.min(Math.max(Math.floor((cLatN - clat) / G.d), 0), NY - 1);
+  }
+  var cOff = document.createElement("canvas");
+  cOff.width = cOW; cOff.height = cOH;
+  var cCtx = cOff.getContext("2d"), cImg = cCtx.createImageData(cOW, cOH), cPx = new Uint32Array(cImg.data.buffer);
+
   var field = new Float32Array(N);
-  var shadeReady = false;
+  var shadeSrc = null;                       // {canvas, bounds} of the last rendered raster
 
   function fillField() {                    // shading variable in display units for the current frame
-    var kind = shadeKind(), t = state.t, i;
+    var kind = shadeKind(), i;
     if (kind === "speed") {
-      var uv = get(shadeFile().replace(/^speed/, "uv")), b = t * 2 * N, k = 0.1 * KT;
+      var uv = get(shadeFile().replace(/^speed/, "uv")), b = state.t * 2 * N, k = 0.1 * KT;
       for (i = 0; i < N; i++) field[i] = Math.hypot(uv[b + i], uv[b + N + i]) * k;
+    } else if (kind === "cdd") {
+      var c = get("cdd"), o = state.day * N;
+      for (i = 0; i < N; i++) field[i] = c[o + i] === 255 ? NaN : c[o + i];
     } else {
-      var a = get(shadeFile()), s = kind === "rain" ? 0.1 : 1, o = t * N;
-      for (i = 0; i < N; i++) field[i] = a[o + i] * s;
+      var a = get(shadeFile()), s = kind === "rain" ? 0.1 : 1, o2 = state.t * N;
+      for (i = 0; i < N; i++) field[i] = a[o2 + i] * s;
     }
   }
 
   function renderShade() {
-    var L_ = lut(shadeKind()), T = L_.t, sc = L_.scale, nmax = L_.n - 1;
+    var kind = shadeKind(), L_ = lut(kind), T = L_.t, sc = L_.scale, nmax = L_.n - 1;
     fillField();
+    if (kind === "cdd") {
+      for (var y2 = 0; y2 < cOH; y2++) {
+        var ro = cRow[y2] * NX, o2 = y2 * cOW;
+        for (var x2 = 0; x2 < cOW; x2++) {
+          var v2 = field[ro + ((x2 / CS) | 0)] * sc;           // NaN (not land) -> class 0, transparent
+          cPx[o2 + x2] = T[(v2 > nmax ? nmax : v2) | 0];
+        }
+      }
+      cCtx.putImageData(cImg, 0, 0);
+      shadeSrc = { canvas: cOff, bounds: [[cLatS, LON_W - G.d / 2], [cLatN, LON_E + G.d / 2]] };
+      return;
+    }
     for (var y = 0; y < OH; y++) {
       var r0 = rowI[y] * NX, r1 = r0 + NX, fy = rowF[y], gy = 1 - fy, o = y * OW;
       for (var x = 0; x < OW; x++) {
@@ -155,15 +192,16 @@ window.addEventListener("load", function () {
       }
     }
     offCtx.putImageData(offImg, 0, 0);
-    shadeReady = true;
+    shadeSrc = { canvas: off, bounds: [[LAT_S, LON_W], [LAT_N, LON_E]] };
   }
 
   function drawShade() {
     var ctx = shadeLayer.begin();
-    if (!shadeReady) return;
-    var nw = map.latLngToContainerPoint([LAT_N, LON_W]), se = map.latLngToContainerPoint([LAT_S, LON_E]);
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(off, nw.x, nw.y, se.x - nw.x, se.y - nw.y);
+    if (!shadeSrc) return;
+    var nw = map.latLngToContainerPoint([shadeSrc.bounds[1][0], shadeSrc.bounds[0][1]]);
+    var se = map.latLngToContainerPoint([shadeSrc.bounds[0][0], shadeSrc.bounds[1][1]]);
+    ctx.imageSmoothingEnabled = shadeKind() !== "cdd";
+    ctx.drawImage(shadeSrc.canvas, nw.x, nw.y, se.x - nw.x, se.y - nw.y);
   }
 
   // ---- flow: bilinear sampling of u/v (units of 0.1 m/s) ------------------------------------------------
@@ -318,7 +356,7 @@ window.addEventListener("load", function () {
 
   function drawFlow() {
     var ctx = flowLayer.begin();
-    if (state.style === "off") return;
+    if (state.style === "off" || inCdd()) return;     // wind has no meaning on the dry-day axis
     var uv = get("uv" + state.level);
     if (!uv) return;
     if (state.style === "arrows") drawArrows(ctx, uv); else drawStreams(ctx);
@@ -332,7 +370,7 @@ window.addEventListener("load", function () {
     q.draw = true;
     requestAnimationFrame(function () {
       q.draw = false;
-      if (q.streams) { q.streams = false; if (state.style === "streams") computeStreams(); }
+      if (q.streams) { q.streams = false; if (state.style === "streams" && !inCdd()) computeStreams(); }
       drawShade(); drawFlow();
     });
   }
@@ -340,6 +378,56 @@ window.addEventListener("load", function () {
   map.on("moveend zoomend", function () { schedule(true); });
   map.on("zoomstart", function () { shadeLayer.canvas.style.visibility = flowLayer.canvas.style.visibility = "hidden"; });
   map.on("zoomend", function () { shadeLayer.canvas.style.visibility = flowLayer.canvas.style.visibility = "visible"; });
+
+  // ---- dry-spell outlines (>= 5 / 10 / 15 days), one layer group per model ---------------------------------------
+  var OUTLINE = { 5: { weight: 1.3, dashArray: "5 4" }, 10: { weight: 1.7 }, 15: { weight: 3 } };
+  var regionLayers = {};                    // model -> Promise<{level: L.GeoJSON}>
+
+  function dayLabel(iso, opts) {
+    return new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", Object.assign({ timeZone: "UTC" }, opts));
+  }
+
+  function regionsFor(model) {
+    var c = cddOf(model);
+    if (!c) return Promise.resolve(null);
+    if (!regionLayers[model]) {
+      regionLayers[model] = fetch(c.files.regions).then(function (r) { return r.json(); }).then(function (gj) {
+        var out = {};
+        CDD_LEVELS.forEach(function (lv) {
+          out[lv] = L.geoJSON(gj, {
+            pane: "wv-cdd",
+            filter: function (f) { return f.properties.level === lv; },
+            style: Object.assign({ color: "#1a1a19", opacity: 0.95, fill: true, fillOpacity: 0 }, OUTLINE[lv]),
+            onEachFeature: function (f, layer) {
+              var p = f.properties, km2 = Number(p.area.split(" ")[0]).toLocaleString("en-GB");
+              layer.bindPopup("<b>≥ " + lv + " consecutive dry days</b><br>Earliest: " +
+                dayLabel(p.earliest, { weekday: "short", day: "2-digit", month: "short" }) +
+                "<br>Peak: " + p.peak + "<br>Area: " + km2 + " km²",
+                { autoPanPaddingTopLeft: [20, 170], autoPanPaddingBottomRight: [20, 110] });
+            }
+          });
+        });
+        return out;
+      });
+      regionLayers[model].catch(function () { delete regionLayers[model]; });
+    }
+    return regionLayers[model];
+  }
+
+  function syncOutlines() {
+    Object.keys(regionLayers).forEach(function (m) {
+      regionLayers[m].then(function (layers) { CDD_LEVELS.forEach(function (lv) { map.removeLayer(layers[lv]); }); });
+    });
+    if (!inCdd()) return;
+    var m = state.model;
+    regionsFor(m).then(function (layers) {
+      if (!layers || m !== state.model || !inCdd()) return;
+      CDD_LEVELS.forEach(function (lv) {
+        var box = document.querySelector('#wv-cdd-controls input[data-level="' + lv + '"]');
+        if (box && box.checked) layers[lv].addTo(map);
+      });
+    });
+  }
 
   // ---- labels, legend, readout ----------------------------------------------------------------------------------
   function fmt(sec, opts) {
@@ -358,21 +446,30 @@ window.addEventListener("load", function () {
     var kind = shadeKind();
     if (kind === "speed") return "Wind speed at " + state.shade.replace("speed", "") + " hPa (knots)";
     if (kind === "rh") return "Relative humidity at " + M.rhLevel + " hPa (%)";
+    if (kind === "cdd") return "Consecutive dry days: longest spell so far";
     var iv = M.models[state.model].interval[state.t];
     return iv ? "Rain in the preceding " + iv + " h (mm)" : "Rain (none at +0 h)";
   }
   function drawLegend() {
-    var P = M.palettes[shadeKind()], bar = el("wv-legend-bar"), ticks = el("wv-legend-ticks");
+    var kind = shadeKind(), P = M.palettes[kind], bar = el("wv-legend-bar"), ticks = el("wv-legend-ticks");
     el("wv-legend-title").textContent = legendTitle();
-    if (bar.dataset.kind !== shadeKind()) {
-      bar.dataset.kind = shadeKind();
+    var note = el("wv-legend-note");
+    note.hidden = kind !== "cdd";
+    if (kind === "cdd") {
+      note.textContent = "Days under " + cddOf(state.model).dryMm + " mm (UTC), counted from the first forecast day. " +
+        "Outlines: ≥ 5 d dashed, ≥ 10 d thin, ≥ 15 d thick.";
+    }
+    if (bar.dataset.kind !== kind) {
+      bar.dataset.kind = kind;
       bar.innerHTML = ""; ticks.innerHTML = "";
       P.colors.forEach(function (c) {
         var d = document.createElement("span"); d.style.background = c; bar.appendChild(d);
       });
       P.edges.forEach(function (v, i) {
+        if (P.ticks && P.ticks.indexOf(v) < 0) return;
         var t = document.createElement("span");
-        t.textContent = v; t.style.left = ((i + 1) / P.colors.length * 100) + "%";
+        t.textContent = P.ticks && v === P.edges[P.edges.length - 1] ? v + "+" : v;
+        t.style.left = ((i + 1) / P.colors.length * 100) + "%";
         ticks.appendChild(t);
       });
     }
@@ -380,17 +477,23 @@ window.addEventListener("load", function () {
 
   var ro = el("wv-readout");
   map.on("mousemove", function (e) {
-    var shadeArr = get(shadeFile().replace(/^speed/, "uv")) || get(shadeFile());
     var parts = [Math.abs(e.latlng.lat).toFixed(1) + "°" + (e.latlng.lat < 0 ? "S" : "N") + " " +
       e.latlng.lng.toFixed(1) + "°E"];
-    var uv = get("uv" + state.level);
-    if (uv && state.style !== "off" && sampleUV(uv, state.t * 2 * N, e.latlng.lng, e.latlng.lat)) {
-      var kt = Math.hypot(su, sv) * 0.1 * KT, from = (270 - Math.atan2(sv, su) / RAD + 360) % 360;
-      parts.push(state.level + " hPa wind " + kt.toFixed(0) + " kt from " + String(Math.round(from) % 360).padStart(3, "0") + "°");
-    }
-    if (shadeArr && shadeReady && state.shade !== "speed" + state.level) {
-      var gx = (e.latlng.lng - LON_W) / G.d, gy = (LAT_N - e.latlng.lat) / G.d;
-      if (gx >= 0 && gy >= 0 && gx <= NX - 1 && gy <= NY - 1) {
+    var gx = (e.latlng.lng - LON_W) / G.d, gy = (LAT_N - e.latlng.lat) / G.d;
+    var inside = gx >= -0.5 && gy >= -0.5 && gx <= NX - 0.5 && gy <= NY - 0.5;
+    if (inCdd()) {
+      if (shadeSrc && inside) {
+        var c = field[Math.min(NY - 1, Math.max(0, Math.round(gy))) * NX + Math.min(NX - 1, Math.max(0, Math.round(gx)))];
+        parts.push(isNaN(c) ? "not land" : "longest dry spell so far: " + c + " days");
+      }
+    } else {
+      var shadeArr = get(shadeFile().replace(/^speed/, "uv")) || get(shadeFile());
+      var uv = get("uv" + state.level);
+      if (uv && state.style !== "off" && sampleUV(uv, state.t * 2 * N, e.latlng.lng, e.latlng.lat)) {
+        var kt = Math.hypot(su, sv) * 0.1 * KT, from = (270 - Math.atan2(sv, su) / RAD + 360) % 360;
+        parts.push(state.level + " hPa wind " + kt.toFixed(0) + " kt from " + String(Math.round(from) % 360).padStart(3, "0") + "°");
+      }
+      if (shadeArr && shadeSrc && state.shade !== "speed" + state.level && gx >= 0 && gy >= 0 && gx <= NX - 1 && gy <= NY - 1) {
         var v = field[Math.round(gy) * NX + Math.round(gx)];
         parts.push(state.shade.indexOf("speed") === 0 ? state.shade.replace("speed", "") + " hPa wind " + v.toFixed(0) + " kt" :
           state.shade === "rain" ? v.toFixed(1) + " mm" : "RH " + v.toFixed(0) + "%");
@@ -400,16 +503,48 @@ window.addEventListener("load", function () {
   });
   map.on("mouseout", function () { ro.hidden = true; });
 
-  // ---- state -> screen -----------------------------------------------------------------------------------------------
+  // ---- time axis: forecast steps, or UTC days when the dry-day layer is shown -------------------------------------------
   var slider = el("wv-slider"), status = el("wv-status"), token = 0;
+
+  function axisLen() { return inCdd() ? cddOf(state.model).dates.length : M.models[state.model].steps.length; }
+  function axisIdx() { return inCdd() ? state.day : state.t; }
+  function nearest(values, target) {
+    var best = 0;
+    values.forEach(function (v, i) { if (Math.abs(v - target) < Math.abs(values[best] - target)) best = i; });
+    return best;
+  }
+  function dayMs(iso) { return Date.parse(iso + "T00:00:00Z"); }
+
+  function timeLabel() {
+    if (inCdd()) {
+      var c = cddOf(state.model), n = c.dates.length;
+      return "Dry spells through " + dayLabel(c.dates[state.day], { weekday: "short", day: "2-digit", month: "short" }) +
+        " (UTC day " + (state.day + 1) + " of " + n + ")";
+    }
+    return validLabel(state.model, state.t);
+  }
+  function updateAxis() {
+    var d = M.models[state.model], n = axisLen();
+    slider.max = n - 1; slider.value = axisIdx();
+    if (inCdd()) {
+      var c = cddOf(state.model);
+      el("wv-first").textContent = dayLabel(c.dates[0], { day: "2-digit", month: "short" });
+      el("wv-last").textContent = dayLabel(c.dates[n - 1], { day: "2-digit", month: "short" });
+      el("wv-run").textContent = d.long + " · CDD from run " +
+        fmt(c.run, { day: "2-digit", month: "short", hour: "2-digit" }) + " UTC";
+    } else {
+      el("wv-first").textContent = shortLabel(state.model, 0);
+      el("wv-last").textContent = shortLabel(state.model, n - 1);
+      el("wv-run").textContent = d.long + " · run " + fmt(d.run, { day: "2-digit", month: "short", hour: "2-digit" }) + " UTC";
+    }
+  }
 
   function setStatus(msg) { status.textContent = msg || ""; status.hidden = !msg; }
 
   function refresh() {                      // make sure the needed files are loaded, then render
     var names = neededFiles(), tk = ++token;
-    drawLegend();
-    el("wv-valid").textContent = validLabel(state.model, state.t);
-    slider.value = state.t;
+    drawLegend(); updateAxis();
+    el("wv-valid").textContent = timeLabel();
     var missing = names.filter(function (n) { return !get(n); });
     if (!missing.length) return render();
     setStatus("Loading…");
@@ -424,24 +559,41 @@ window.addEventListener("load", function () {
     schedule(true);
   }
 
-  function setFrame(t) {
-    state.t = Math.max(0, Math.min(M.models[state.model].steps.length - 1, t));
+  function setFrame(i) {
+    i = Math.max(0, Math.min(axisLen() - 1, i));
+    if (inCdd()) state.day = i; else state.t = i;
     refresh();
   }
 
+  function syncControls() {
+    var cdd = inCdd();
+    el("wv-level").disabled = cdd;
+    document.querySelectorAll("#wv-style button").forEach(function (b) { b.disabled = cdd; });
+    el("wv-cdd-controls").hidden = !cdd;
+    if (cdd && cddOf(state.model)) el("wv-nc").href = cddOf(state.model).files.nc;
+    var opt = shadeSel.querySelector('option[value="cdd"]');
+    if (opt) opt.disabled = !cddOf(state.model);
+    syncOutlines();
+  }
+
   function setModel(key) {
-    var prev = M.models[state.model].valid[state.t];
+    var prevT = M.models[state.model].valid[state.t];
+    var prevDay = inCdd() && state.day != null ? dayMs(cddOf(state.model).dates[state.day]) : null;
     state.model = key;
-    var d = M.models[key], best = 0;
-    d.valid.forEach(function (v, i) { if (Math.abs(v - prev) < Math.abs(d.valid[best] - prev)) best = i; });
-    slider.max = d.steps.length - 1;
-    el("wv-run").textContent = d.long + " · run " + fmt(d.run, { day: "2-digit", month: "short", hour: "2-digit" }) + " UTC";
-    el("wv-first").textContent = shortLabel(key, 0);
-    el("wv-last").textContent = shortLabel(key, d.steps.length - 1);
+    var d = M.models[key];
+    if (inCdd() && !cddOf(key)) {           // this model has no dry-day data (its analysis failed)
+      state.shade = state.prevShade || "speed" + M.levels[0];
+      shadeSel.value = state.shade;
+      setStatus("No consecutive-dry-days layer for " + d.label);
+      setTimeout(function () { setStatus(""); }, 2500);
+    }
+    state.t = nearest(d.valid, prevT);
+    if (cddOf(key) && prevDay != null) state.day = nearest(cddOf(key).dates.map(dayMs), prevDay);
     document.querySelectorAll("#wv-tabs button").forEach(function (b) {
       b.setAttribute("aria-selected", String(b.dataset.key === key));
     });
-    setFrame(best);
+    syncControls();
+    setFrame(axisIdx());
   }
 
   // ---- controls -----------------------------------------------------------------------------------------------------------
@@ -460,8 +612,20 @@ window.addEventListener("load", function () {
   });
   shadeSel.add(new Option("Rain", "rain"));
   shadeSel.add(new Option("Relative humidity " + M.rhLevel + " hPa", "rh"));
+  if (models.some(cddOf)) shadeSel.add(new Option("Consecutive dry days", "cdd"));
   shadeSel.value = state.shade; levelSel.value = String(state.level);
-  shadeSel.addEventListener("change", function () { state.shade = shadeSel.value; refresh(); });
+  shadeSel.addEventListener("change", function () {
+    var was = inCdd();
+    if (!was) state.prevShade = state.shade;
+    state.shade = shadeSel.value;
+    if (inCdd() && !cddOf(state.model)) {   // option should be disabled, but be safe
+      state.shade = state.prevShade; shadeSel.value = state.shade;
+      return;
+    }
+    if (inCdd() && (state.day == null || state.day >= axisLen())) state.day = axisLen() - 1;   // start on the full-forecast maximum
+    syncControls();
+    refresh();
+  });
   levelSel.addEventListener("change", function () { state.level = +levelSel.value; refresh(); });
   document.querySelectorAll("#wv-style button").forEach(function (b) {
     b.addEventListener("click", function () {
@@ -472,6 +636,9 @@ window.addEventListener("load", function () {
       refresh();
     });
   });
+  document.querySelectorAll("#wv-cdd-controls input").forEach(function (b) {
+    b.addEventListener("change", syncOutlines);
+  });
 
   slider.addEventListener("input", function () { setFrame(+slider.value); });
   function stop() {
@@ -481,15 +648,15 @@ window.addEventListener("load", function () {
   function play() {
     el("wv-play").innerHTML = "&#10074;&#10074;"; el("wv-play").setAttribute("aria-label", "Pause");
     timer = setInterval(function () {
-      var n = M.models[state.model].steps.length;
-      setFrame(state.t + 1 >= n ? 0 : state.t + 1);
+      var n = axisLen();
+      setFrame(axisIdx() + 1 >= n ? 0 : axisIdx() + 1);
     }, PLAY_MS);
   }
   el("wv-play").addEventListener("click", function () { timer ? stop() : play(); });
   document.addEventListener("keydown", function (e) {
-    if (e.target === slider || e.target.tagName === "BUTTON" || e.target.tagName === "SELECT") return;
-    if (e.key === "ArrowRight") setFrame(state.t + 1);
-    if (e.key === "ArrowLeft") setFrame(state.t - 1);
+    if (e.target === slider || e.target.tagName === "BUTTON" || e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+    if (e.key === "ArrowRight") setFrame(axisIdx() + 1);
+    if (e.key === "ArrowLeft") setFrame(axisIdx() - 1);
   });
 
   setModel(state.model);

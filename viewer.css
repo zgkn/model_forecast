@@ -56,6 +56,11 @@ body { font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
   font: inherit; color: var(--wv-ink); background: transparent;
   border: 1px solid var(--wv-line); border-radius: 6px; padding: 4px 6px;
 }
+.wv-controls .wv-label { color: var(--wv-ink-2); font-size: 12px; }
+.wv-controls input[type="checkbox"] { accent-color: var(--wv-accent); margin: 0; }
+.wv-controls a { color: var(--wv-accent); font-size: 12px; }
+.wv-controls [disabled] { opacity: 0.4; cursor: not-allowed; }
+#wv-legend-note { margin-top: 4px; font-size: 11px; color: var(--wv-ink-2); line-height: 1.3; }
 .wv-controls select option { color: #1a1a19; background: #fff; }
 #wv-valid { font-weight: 600; font-variant-numeric: tabular-nums; }
 #wv-run { color: var(--wv-ink-2); font-size: 12px; }
@@ -102,3 +107,5 @@ body { font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
   #wv-bottom { bottom: 24px; }
   #wv-credit, #wv-readout { display: none; }
 }
+
+[hidden] { display: none !important; }

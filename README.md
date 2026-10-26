@@ -14,13 +14,36 @@ It also needs internet for the Leaflet library and the map tiles.
 
 ## What you can show
 
-* **Shading** (one at a time): wind speed at 925 / 850 / 700 hPa, rain, relative humidity at 700 hPa.
+* **Shading** (one at a time): wind speed at 925 / 850 / 700 hPa, rain, relative humidity at 700 hPa, and
+  **consecutive dry days** (see below).
 * **Flow** (independent of the shading): 925 / 850 / 700 hPa wind as **arrows**, **streamlines**, or off.
 * Wind speed uses your knots colour scale (5-kt bins). Rain is the amount in the preceding model step interval:
   **3 h for IFS, 6 h for AIFS** (IFS steps beyond +144 h are 6-hourly). Humidity is computed from specific humidity
   and temperature for both models (AIFS has no relative humidity field).
 * Switching tab keeps the current valid time (nearest step). Play/pause, the slider and left/right arrow keys step
   through time. Hovering shows the values under the cursor.
+
+## Consecutive dry days (CDD)
+
+Fire-susceptibility layer from the 15-day precipitation forecast (`cdd.py`, tested in `tests/test_cdd.py`):
+
+* `tp` (accumulated from the run start) is taken at the **00 UTC** steps out to +360 h; the difference between
+  consecutive midnights is the rain of that UTC day (mm, negatives clipped; a missing midnight gives a NaN day).
+  A 00Z run gives 15 full days, a 12Z run 14 (its first 12 h is a partial day and is dropped; the 06/18Z
+  AIFS runs likewise), so a **15-day spell can only occur in a run that starts at 00Z**.
+* A day is **dry** if it has less than 1 mm (missing data is not dry). The streak engine gives, per cell, the longest
+  spell so far and the first day a spell reached 5, 10 and 15 days.
+* Only land counts: Natural Earth land polygons (`land.geojson`) are sampled 4x4 per grid cell, land if at least 15%.
+* The slider switches to **UTC days**: the colours show the longest dry spell **so far** (up to and including that day;
+  the last day is the full-forecast maximum). Outlines of the regions that reach 5 / 10 / 15 days are for the whole
+  forecast; click one for the earliest date, peak and area (4-connected regions, polygons follow the grid cells).
+  `data/<model>_<run>_cdd.nc` (NetCDF, `max_cdd` and `first_day_ge_5/10/15`) can be downloaded from the page.
+* IFS uses the latest run that has published step 360 (a 00/12Z run); AIFS its latest run. The CDD run can differ
+  from the run of the animated layers and is named in the header.
+* Limitations: streaks start at forecast day 0, so a dry spell already under way is under-counted; a UTC day is
+  07:00-07:00 local in western Indonesia; skill of a deterministic forecast falls quickly beyond ~10 days.
+* If the CDD analysis fails (no land, maximum 0, missing data) the site is still built without the layer and the
+  workflow logs a warning. `--no-cdd` skips it.
 
 ## How it stays fast
 
@@ -39,6 +62,7 @@ It also needs internet for the Leaflet library and the map tiles.
 | `--workers 8` | 8 | parallel downloads |
 | `--cache-dir` | `cache/` | where the cropped data is kept |
 | `--no-fetch` / `--fetch-only` | | build from the cache only / refresh the cache only |
+| `--no-cdd` | | skip the consecutive-dry-days layer |
 | `--source aws` | aws | open-data mirror: `aws`, `google`, `azure`, `ecmwf` |
 | `--out` | `output/index.html` | |
 
@@ -48,7 +72,7 @@ Steps: IFS every 3 h (6 h after +144 h on 00/12 UTC runs); AIFS every 6 h. The r
 
 ## Data cache (the `data` branch)
 
-Downloading a run takes a while, so the cropped region (int16, ~16 MB for both models) is kept in
+Downloading a run takes a while, so the cropped region (int16, ~17 MB for both models, plus the small CDD files) is kept in
 `cache/<model>_<run>.npz`. When a newer run exists the old file is deleted. In CI the cache lives on the `data`
 branch: a single commit that the workflow force-pushes whenever there is a new run, so the history never grows.
 
@@ -79,4 +103,5 @@ from the default branch.
 
 * `wind_forecast.py` - download, cache and site build
 * `viewer.html`, `viewer.css`, `viewer.js` - the UI that is inlined into the Folium page
-* `coastlines.geojson`, `tools/make_coastlines.mjs` - coastline/border data and its generator
+* `cdd.py`, `tests/` - consecutive-dry-days engine and its tests (`python -m pytest`)
+* `coastlines.geojson`, `land.geojson`, `tools/make_coastlines.mjs` - coastline/border/land data and its generator

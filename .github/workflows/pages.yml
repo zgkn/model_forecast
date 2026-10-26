@@ -34,7 +34,10 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt pytest
+
+      - name: Tests
+        run: python -m pytest -q
 
       # The `data` branch holds the cropped data of the latest ECMWF run only (a single, force-pushed
       # commit), so most builds download nothing.

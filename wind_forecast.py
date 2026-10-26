@@ -4,7 +4,8 @@
 For the latest 00/06/12/18 UTC run of each model it fetches, per forecast step,
 u/v at 925/850/700 hPa, q/t at 700 hPa (-> relative humidity) and total precipitation,
 crops them to the region and keeps them in a small cache file (cache/<model>_<run>.npz;
-older runs of the model are deleted). Then it writes a static site: a Folium page plus
+older runs of the model are deleted). For consecutive dry days (cdd.py) it also fetches tp at the UTC
+midnights out to +360 h from the latest run that has published them (cache/cdd-<model>_<run>.npz). Then it writes a static site: a Folium page plus
 compact binary data files (one per model and variable) that the page loads on demand
 and draws on canvas layers (shading, arrows, streamlines).
 
@@ -21,6 +22,7 @@ The page loads its data with fetch(), so open it through a web server, e.g.
 import argparse
 import gzip
 import json
+import os
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -33,6 +35,8 @@ import requests
 import xarray as xr
 from branca.element import Element
 from ecmwf.opendata import Client
+
+import cdd
 
 HERE = Path(__file__).resolve().parent
 LEVELS = [925, 850, 700]  # wind levels (hPa); humidity is taken at RH_LEVEL
@@ -73,6 +77,23 @@ PALETTES = {
     },
 }
 
+def _cdd_colors(n=15):
+    """Yellow (#FFFFCC) -> orange -> red (#BD0026) for 1..n days; class 0 (no dry spell) is transparent."""
+    stops = [(1, (255, 255, 204)), (8, (253, 141, 60)), (n, (189, 0, 38))]
+    out = ["#ffffff"]
+    for day in range(1, n + 1):
+        (d0, c0), (d1, c1) = next((a, b) for a, b in zip(stops, stops[1:]) if day <= b[0])
+        f = (day - d0) / (d1 - d0)
+        out.append("#%02x%02x%02x" % tuple(round(a + (b - a) * f) for a, b in zip(c0, c1)))
+    return out
+
+
+PALETTES["cdd"] = {"unit": "days", "edges": list(range(1, 16)), "colors": _cdd_colors(),
+                   "alpha": [0.0] + [0.8] * 15, "ticks": [1, 5, 10, 15]}
+
+CDD_STEP = 360  # the 15-day horizon
+LAND_FILE = HERE / "land.geojson"
+
 MODELS = {
     "ifs": {"client_model": "ifs", "label": "IFS", "long": "ECMWF IFS (HRES, 0.25°)"},
     "aifs": {"client_model": "aifs-single", "label": "AIFS", "long": "ECMWF AIFS Single (0.25°)"},
@@ -92,7 +113,7 @@ def candidate_steps(model, hour, max_step):
 
 # ---- download ----------------------------------------------------------------------------------
 
-def fetch_step(client, run, step, tmp):
+def fetch_step(client, run, step, tmp, which=("uv", "qt", "tp")):
     """Download the GRIBs of one step; None when the step is not published (yet)."""
     base = dict(type="fc", stream="oper", date=run.strftime("%Y%m%d"), time=run.hour, step=step)
     jobs = {
@@ -101,7 +122,8 @@ def fetch_step(client, run, step, tmp):
         "tp": dict(levtype="sfc", param="tp"),
     }
     files = {}
-    for name, req in jobs.items():
+    for name in which:
+        req = jobs[name]
         target = Path(tmp) / f"{name}{step:03d}.grib2"
         try:
             client.retrieve(**base, **req, target=str(target))
@@ -113,11 +135,11 @@ def fetch_step(client, run, step, tmp):
     return files
 
 
-def latest_run(model, source, max_step):
-    """Newest run of the model that has already published its (capped) steps."""
+def latest_run(model, source, step):
+    """Newest run of the model that has already published the given forecast step."""
     # the client's default is 500 retries 120 s apart; S3 answers "503 Slow Down" under load, so retry fast
     client = Client(source=source, model=MODELS[model]["client_model"], maximum_retries=12, retry_after=5)
-    run = client.latest(type="fc", stream="oper", step=min(max_step, 144), param="u",
+    run = client.latest(type="fc", stream="oper", step=step, param="u",
                         levtype="pl", levelist=LEVELS[0])
     return client, run
 
@@ -197,7 +219,7 @@ def prune_cache(cache_dir, model, keep):
 
 def fetch_model(model, source, max_step, cache_dir, workers):
     """Make sure the cache holds the latest run of the model; return its cache file."""
-    client, run = latest_run(model, source, max_step)
+    client, run = latest_run(model, source, min(max_step, 144))
     path = cache_file(cache_dir, model, run)
     if path.exists():
         cached = load_cache(path)
@@ -220,6 +242,81 @@ def fetch_model(model, source, max_step, cache_dir, workers):
     prune_cache(cache_dir, model, path)
     print(f"[{model}] cached -> {path} ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
     return path
+
+
+# ---- consecutive dry days: tp at the UTC midnights to +360 h ----------------------------------------
+
+def cdd_cache_file(cache_dir, model, run):
+    return cache_dir / f"cdd-{model}_{run:%Y%m%d%H}.npz"
+
+
+def newest_cdd(cache_dir, model):
+    files = sorted(cache_dir.glob(f"cdd-{model}_*.npz"))
+    return files[-1] if files else None
+
+
+def load_cdd_cache(path):
+    z = np.load(path)
+    if not np.array_equal(z["region"], REGION):
+        return None
+    return {"steps": z["steps"].tolist(), "tp": z["tp"].astype("float32") / 10}   # accumulated mm
+
+
+def fetch_cdd(model, source, cache_dir, workers):
+    """Cache accumulated tp at every 00 UTC out to +360 h of the latest run that has published step 360."""
+    client, run = latest_run(model, source, CDD_STEP)
+    path = cdd_cache_file(cache_dir, model, run)
+    if path.exists() and load_cdd_cache(path):
+        print(f"[{model}] CDD run {run:%Y-%m-%d %H}Z already cached", flush=True)
+    else:
+        steps = [s for s in candidate_steps(model, run.hour, CDD_STEP) if (run.hour + s) % 24 == 0]
+        print(f"[{model}] CDD run {run:%Y-%m-%d %H}Z, downloading tp at {len(steps)} midnights", flush=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            with ThreadPoolExecutor(workers) as pool:
+                files = list(pool.map(lambda s: fetch_step(client, run, s, tmp, ("tp",)), steps))
+            got = [(s, f) for s, f in zip(steps, files) if f is not None]
+            tps = []
+            for _, f in got:
+                with open_region(f["tp"]) as ds:
+                    a = ds.tp.values.astype("float32")
+                    tps.append(a * 1000 if ds.tp.attrs.get("units") == "m" else a)
+        if len(got) < cdd.MIN_DAYS + 1:
+            raise RuntimeError(f"only {len(got)} midnight steps available for the {model} CDD run")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(path, steps=np.array([s for s, _ in got], "int16"), region=np.array(REGION),
+                            tp=np.clip(np.round(np.stack(tps) * 10), 0, 65535).astype("uint16"))
+    for old in cache_dir.glob(f"cdd-{model}_*.npz"):
+        if old != path:
+            old.unlink()
+            print(f"[{model}] removed old cache {old.name}", flush=True)
+    return path
+
+
+def write_cdd(model, path, data_dir, land):
+    """Run the CDD analysis on the cached tp and write its site files; return the manifest entry."""
+    run = run_of(path)
+    cached = load_cdd_cache(path)
+    if cached is None:
+        raise RuntimeError(f"{path} was written for another region; refresh the cache")
+    res = cdd.compute(run, cached["steps"], cached["tp"], land, LAT_N, LON_W, STEP, scale=1.0)
+    tag = f"{model}_{run:%Y%m%d%H}"
+    files = {"cdd": f"data/{tag}_cdd.bin.gz", "regions": f"data/{tag}_cddregions.json", "nc": f"data/{tag}_cdd.nc"}
+    cdd.to_dataset(res, LAT_N, LON_W, STEP).to_netcdf(data_dir / f"{tag}_cdd.nc", engine="h5netcdf")
+    running = np.where(res.running_max < 0, 255, res.running_max).astype("uint8")   # 255 = not land
+    (data_dir / f"{tag}_cdd.bin.gz").write_bytes(gz(running))
+    (data_dir / f"{tag}_cddregions.json").write_text(json.dumps(res.regions, separators=(",", ":")))
+    n = {lv: sum(f["properties"]["level"] == lv for f in res.regions["features"]) for lv in cdd.LEVELS}
+    print(f"[{model}] CDD run {run:%Y-%m-%d %H}Z: {len(res.dates)} days, max {np.nanmax(res.max_cdd):.0f}, "
+          f"regions {n}", flush=True)
+    return {"run": int(run.timestamp()), "dates": [d.isoformat() for d in res.dates],
+            "bounds": [[LAT_S - STEP / 2, LON_W - STEP / 2], [LAT_N + STEP / 2, LON_E + STEP / 2]],
+            "dryMm": cdd.DRY_MM, "files": files}
+
+
+def warn(msg):
+    print(f"WARNING: {msg}", flush=True)
+    if os.environ.get("GITHUB_ACTIONS"):
+        print(f"::warning title=CDD::{msg}", flush=True)
 
 
 # ---- site --------------------------------------------------------------------------------------
@@ -294,6 +391,7 @@ def main():
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--no-fetch", action="store_true", help="never contact ECMWF; use the newest cached run")
     mode.add_argument("--fetch-only", action="store_true", help="refresh the cache and stop")
+    ap.add_argument("--no-cdd", action="store_true", help="skip the consecutive-dry-days layer")
     ap.add_argument("--out", type=Path, default=HERE / "output" / "index.html")
     args = ap.parse_args()
 
@@ -305,20 +403,41 @@ def main():
                 sys.exit(f"nothing cached for {model} in {args.cache_dir}")
         else:
             paths[model] = fetch_model(model, args.source, args.max_step, args.cache_dir, args.workers)
+    cdd_paths = {}
+    if not args.no_cdd:
+        for model in args.models:        # a CDD problem must never stop the rest of the site
+            try:
+                cdd_paths[model] = newest_cdd(args.cache_dir, model) if args.no_fetch else \
+                    fetch_cdd(model, args.source, args.cache_dir, args.workers)
+                if cdd_paths[model] is None:
+                    warn(f"nothing cached for the {model} CDD layer")
+            except Exception as e:
+                warn(f"{model} CDD data unavailable: {e}")
     if args.fetch_only:
         return
 
     site = args.out.parent
     data_dir = site / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    for old in data_dir.glob("*.bin.gz"):
-        old.unlink()
+    for pattern in ("*.bin.gz", "*cdd*.json", "*.nc"):
+        for old in data_dir.glob(pattern):
+            old.unlink()
     manifest = {
         "grid": {"lat0": LAT_N, "lon0": LON_W, "d": STEP, "nlat": NY, "nlon": NX,
                  "bounds": [[LAT_S, LON_W], [LAT_N, LON_E]]},
         "levels": LEVELS, "rhLevel": RH_LEVEL, "palettes": PALETTES,
         "models": {m: write_model(m, p, args.max_step, data_dir) for m, p in paths.items()},
     }
+    land = None
+    for model, path in cdd_paths.items():
+        if path is None:
+            continue
+        try:
+            if land is None:
+                land = cdd.land_mask(json.loads(LAND_FILE.read_text()), LAT_N, LON_W, STEP, NY, NX)
+            manifest["models"][model]["cdd"] = write_cdd(model, path, data_dir, land)
+        except Exception as e:
+            warn(f"{model} CDD layer left out: {e}")
     (data_dir / "coastlines.json").write_text((HERE / "coastlines.geojson").read_text())
     build_site(manifest, args.out)
     runs = {m: p.stem.split("_")[1] for m, p in paths.items()}
