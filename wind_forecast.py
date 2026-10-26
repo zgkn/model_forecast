@@ -25,6 +25,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -92,6 +93,7 @@ PALETTES["cdd"] = {"unit": "days", "edges": list(range(1, 16)), "colors": _cdd_c
                    "alpha": [0.0] + [0.8] * 15, "ticks": [1, 5, 10, 15]}
 
 CDD_STEP = 360  # the 15-day horizon
+DOWNLOAD_BUDGET_S = 420  # give up on a model's download after this long and use the cached run
 LAND_FILE = HERE / "land.geojson"
 
 MODELS = {
@@ -138,8 +140,8 @@ def fetch_step(client, run, step, tmp, which=("uv", "qt", "tp")):
 def latest_run(model, source, step):
     """Newest run of the model that has already published the given forecast step."""
     # the client's default is 500 retries 120 s apart; S3 answers "503 Slow Down" under load, so retry fast
-    client = Client(source=source, model=MODELS[model]["client_model"], maximum_retries=15,
-                    retry_after=(5, 60, 1.7))      # waits grow from 5 s to 60 s
+    client = Client(source=source, model=MODELS[model]["client_model"], maximum_retries=8,
+                    retry_after=(5, 60, 1.7))      # waits grow from 5 s to 60 s, ~3.5 min at most per request
     run = client.latest(type="fc", stream="oper", step=step, param="u",
                         levtype="pl", levelist=LEVELS[0])
     return client, run
@@ -244,10 +246,14 @@ def fetch_model(model, source, max_step, cache_dir, workers):
     print(f"[{model}] run {run:%Y-%m-%d %H}Z, downloading {len(steps)} steps", flush=True)
     with tempfile.TemporaryDirectory() as tmp:
         with ThreadPoolExecutor(workers) as pool:
+            deadline = time.monotonic() + DOWNLOAD_BUDGET_S
+            futures = [pool.submit(fetch_step, client, run, s, tmp) for s in steps]
             try:
-                files = list(pool.map(lambda s: fetch_step(client, run, s, tmp), steps))
-            except BaseException:
+                files = [f.result(timeout=max(1.0, deadline - time.monotonic())) for f in futures]
+            except BaseException as e:
                 pool.shutdown(wait=False, cancel_futures=True)   # do not keep downloading after a failure
+                if isinstance(e, TimeoutError):
+                    raise RuntimeError(f"download did not finish within {DOWNLOAD_BUDGET_S // 60} min") from e
                 raise
         got = [(s, f) for s, f in zip(steps, files) if f is not None]
         if not got:
