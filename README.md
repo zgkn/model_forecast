@@ -55,6 +55,22 @@ If the browser cannot load it there (for example ECMWF refuses cross-site reques
 chart on ECMWF Open Charts instead. The place and product are set at the top of `viewer.js` (`EPS`).
 Check ECMWF's terms for Open Charts for your use; the tab credits ECMWF Open Charts.
 
+## CAMS tab (organic matter AOD)
+
+A **CAMS** tab shows the CAMS global forecast of organic matter aerosol optical depth at 550 nm (a smoke signal),
+3-hourly out to +120 h. Colour scale 0 to 5 (top class 5 and above): bins at 0.1, 0.2, 0.3, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5.
+
+* `cams.py` downloads it the way the AOD_PM project does: dataset `cams-global-atmospheric-composition-forecasts`
+  from the Atmosphere Data Store with `cdsapi`, the newest 00/12 UTC cycle first and older cycles as fallback.
+  It is cut to the map region, interpolated from CAMS's ~0.4 degree grid onto the 0.25 degree map grid and cached
+  (`cache/cams_<cycle>.npz`, newest only, 0.02 AOD per count so 0 to 5.1 fits in a byte). The page file is ~60 KB.
+* It needs an ADS key: add the repository secret **`CDSAPI_KEY`** (the key shown at
+  https://ads.atmosphere.copernicus.eu/how-to-api once logged in) and accept the dataset's licence on the ADS site
+  once. Locally put the key in `~/.cdsapirc` (`url: https://ads.atmosphere.copernicus.eu/api`, `key: ...`).
+* Without the key, or if the download fails, the tab is left out and the workflow logs a warning (the last cached
+  cycle is reused if there is one). `--models ifs aifs` skips CAMS; `--models cams` is CAMS only.
+* Data: Generated using Copernicus Atmosphere Monitoring Service information.
+
 ## How it stays fast
 
 * Each model and variable is a separate small binary file (`output/data/<model>_<run>_<var>.bin.gz`) loaded only
@@ -67,7 +83,7 @@ Check ECMWF's terms for Open Charts for your use; the tab credits ECMWF Open Cha
 
 | option | default | |
 |---|---|---|
-| `--models ifs aifs` | both | models to include |
+| `--models ifs aifs cams` | all | models to include; `cams` needs ADS credentials |
 | `--max-step 144` | 144 | last forecast step in hours (IFS 00/12 UTC runs go to 360, 06/18 UTC to 144; AIFS to 360) |
 | `--workers 4` | 4 | parallel downloads (S3 answers "503 Slow Down" if hit harder) |
 | `--cache-dir` | `cache/` | where the cropped data is kept |
@@ -114,5 +130,5 @@ from the default branch.
 
 * `wind_forecast.py` - download, cache and site build
 * `viewer.html`, `viewer.css`, `viewer.js` - the UI that is inlined into the Folium page
-* `cdd.py`, `tests/` - consecutive-dry-days engine and its tests (`python -m pytest`)
+* `cdd.py`, `cams.py`, `tests/` - consecutive-dry-days engine, CAMS download and their tests (`python -m pytest`)
 * `coastlines.geojson`, `land.geojson`, `tools/make_coastlines.mjs` - coastline/border/land data and its generator

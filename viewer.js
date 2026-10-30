@@ -13,7 +13,7 @@ window.addEventListener("load", function () {
 
   var el = function (id) { return document.getElementById(id); };
   var models = Object.keys(M.models);
-  var state = { view: "map", model: models[0], t: 0, day: null, shade: "speed" + M.levels[0], prevShade: null,
+  var state = { view: "map", lastShade: {}, model: models[0], t: 0, day: null, shade: "speed" + M.levels[0], prevShade: null,
                 level: M.levels[0], style: "arrows" };
   var timer = null;
 
@@ -24,6 +24,7 @@ window.addEventListener("load", function () {
 
   function cddOf(m) { return M.models[m].cdd; }
   function inCdd() { return state.shade === "cdd"; }
+  function noFlow() { return inCdd() || state.shade === "aod"; }   // wind is not shown with these layers
   models.forEach(function (m) { if (cddOf(m)) M.models[m].files.cdd = cddOf(m).files.cdd; });
 
   // ---- data loading: one binary file per model and variable, fetched on demand -----------------
@@ -52,10 +53,11 @@ window.addEventListener("load", function () {
     return pending[key];
   }
 
-  function shadeKind() { return state.shade.indexOf("speed") === 0 ? "speed" : state.shade === "rain" ? "rain" : state.shade === "cdd" ? "cdd" : "rh"; }
+  function shadeKind() { return state.shade.indexOf("speed") === 0 ? "speed" : state.shade === "rain" ? "rain" : state.shade === "cdd" ? "cdd" : state.shade === "aod" ? "aod" : "rh"; }
   function shadeFile() { return state.shade === "rh" ? "rh" + M.rhLevel : state.shade; }
   function neededFiles() {
     if (inCdd()) return ["cdd"];
+    if (state.shade === "aod") return ["aod"];
     var f = [shadeFile().replace(/^speed/, "uv")];
     if (state.style !== "off") f.push("uv" + state.level);
     return f.filter(function (n, i) { return f.indexOf(n) === i; });
@@ -66,7 +68,7 @@ window.addEventListener("load", function () {
   var LUTS = {};
   function lut(kind) {
     if (LUTS[kind]) return LUTS[kind];
-    var P = M.palettes[kind], vmax = { speed: 150, rain: 300, rh: 100, cdd: 40 }[kind], scale = { speed: 4, rain: 10, rh: 4, cdd: 1 }[kind];
+    var P = M.palettes[kind], vmax = { speed: 150, rain: 300, rh: 100, cdd: 40, aod: 6 }[kind], scale = { speed: 4, rain: 10, rh: 4, cdd: 1, aod: 100 }[kind];
     var n = Math.ceil(vmax * scale) + 1, t = new Uint32Array(n);
     var rgba = P.colors.map(function (c, i) {
       var r = parseInt(c.substr(1, 2), 16), g = parseInt(c.substr(3, 2), 16), b = parseInt(c.substr(5, 2), 16);
@@ -161,7 +163,7 @@ window.addEventListener("load", function () {
       var c = get("cdd"), o = state.day * N;
       for (i = 0; i < N; i++) field[i] = c[o + i] === 255 ? NaN : c[o + i];
     } else {
-      var a = get(shadeFile()), s = kind === "rain" ? 0.1 : 1, o2 = state.t * N;
+      var a = get(shadeFile()), s = kind === "rain" ? 0.1 : kind === "aod" ? 0.02 : 1, o2 = state.t * N;
       for (i = 0; i < N; i++) field[i] = a[o2 + i] * s;
     }
   }
@@ -356,7 +358,7 @@ window.addEventListener("load", function () {
 
   function drawFlow() {
     var ctx = flowLayer.begin();
-    if (state.style === "off" || inCdd()) return;     // wind has no meaning on the dry-day axis
+    if (state.style === "off" || noFlow()) return;     // wind has no meaning on the dry-day axis or for CAMS AOD
     var uv = get("uv" + state.level);
     if (!uv) return;
     if (state.style === "arrows") drawArrows(ctx, uv); else drawStreams(ctx);
@@ -370,7 +372,7 @@ window.addEventListener("load", function () {
     q.draw = true;
     requestAnimationFrame(function () {
       q.draw = false;
-      if (q.streams) { q.streams = false; if (state.style === "streams" && !inCdd()) computeStreams(); }
+      if (q.streams) { q.streams = false; if (state.style === "streams" && !noFlow()) computeStreams(); }
       drawShade(); drawFlow();
     });
   }
@@ -447,6 +449,7 @@ window.addEventListener("load", function () {
     if (kind === "speed") return "Wind speed at " + state.shade.replace("speed", "") + " hPa (knots)";
     if (kind === "rh") return "Relative humidity at " + M.rhLevel + " hPa (%)";
     if (kind === "cdd") return "Consecutive dry days: longest spell so far";
+    if (kind === "aod") return "Organic matter aerosol optical depth at 550 nm (CAMS)";
     var iv = M.models[state.model].interval[state.t];
     return iv ? "Rain in the preceding " + iv + " h (mm)" : "Rain (none at +0 h)";
   }
@@ -454,7 +457,8 @@ window.addEventListener("load", function () {
     var kind = shadeKind(), P = M.palettes[kind], bar = el("wv-legend-bar"), ticks = el("wv-legend-ticks");
     el("wv-legend-title").textContent = legendTitle();
     var note = el("wv-legend-note");
-    note.hidden = kind !== "cdd";
+    note.hidden = kind !== "cdd" && kind !== "aod";
+    if (kind === "aod") note.textContent = "Generated using Copernicus Atmosphere Monitoring Service information.";
     if (kind === "cdd") {
       note.textContent = "Days under " + cddOf(state.model).dryMm + " mm (UTC), counted from the first forecast day. " +
         "Outlines: ≥ 5 d dashed, ≥ 10 d thin, ≥ 15 d thick.";
@@ -496,7 +500,7 @@ window.addEventListener("load", function () {
       if (shadeArr && shadeSrc && state.shade !== "speed" + state.level && gx >= 0 && gy >= 0 && gx <= NX - 1 && gy <= NY - 1) {
         var v = field[Math.round(gy) * NX + Math.round(gx)];
         parts.push(state.shade.indexOf("speed") === 0 ? state.shade.replace("speed", "") + " hPa wind " + v.toFixed(0) + " kt" :
-          state.shade === "rain" ? v.toFixed(1) + " mm" : "RH " + v.toFixed(0) + "%");
+          state.shade === "rain" ? v.toFixed(1) + " mm" : state.shade === "aod" ? "organic matter AOD " + v.toFixed(2) : "RH " + v.toFixed(0) + "%");
       }
     }
     ro.textContent = parts.join(" · "); ro.hidden = false;
@@ -566,9 +570,9 @@ window.addEventListener("load", function () {
   }
 
   function syncControls() {
-    var cdd = inCdd();
-    el("wv-level").disabled = cdd;
-    document.querySelectorAll("#wv-style button").forEach(function (b) { b.disabled = cdd; });
+    var cdd = inCdd(), noWind = noFlow();
+    el("wv-level").disabled = noWind;
+    document.querySelectorAll("#wv-style button").forEach(function (b) { b.disabled = noWind; });
     el("wv-cdd-controls").hidden = !cdd;
     if (cdd && cddOf(state.model)) el("wv-nc").href = cddOf(state.model).files.nc;
     var opt = shadeSel.querySelector('option[value="cdd"]');
@@ -576,14 +580,38 @@ window.addEventListener("load", function () {
     syncOutlines();
   }
 
+  // each model offers its own shadings (CAMS only has its AOD); the choice is remembered per kind of model
+  function shadeGroup(m) { return M.models[m].shading ? "own" : "nwp"; }
+  function shadeOptionsFor(model) {
+    var d = M.models[model];
+    if (d.shading) return d.shading.map(function (o) { return [o.value, o.label]; });
+    var o = M.levels.map(function (l) { return ["speed" + l, "Wind speed " + l + " hPa"]; });
+    o.push(["rain", "Rain"], ["rh", "Relative humidity " + M.rhLevel + " hPa"]);
+    if (cddOf(model)) o.push(["cdd", "Consecutive dry days"]);
+    return o;
+  }
+  function rebuildShadeOptions() {
+    var opts = shadeOptionsFor(state.model);
+    shadeSel.innerHTML = "";
+    opts.forEach(function (o) { shadeSel.add(new Option(o[1], o[0])); });
+    if (!opts.some(function (o) { return o[0] === state.shade; })) state.shade = opts[0][0];
+    shadeSel.value = state.shade;
+  }
+
   function setModel(key) {
-    var prevT = M.models[state.model].valid[state.t];
-    var prevDay = inCdd() && state.day != null ? dayMs(cddOf(state.model).dates[state.day]) : null;
+    var prevModel = state.model;
+    var prevT = M.models[prevModel].valid[state.t];
+    var prevDay = inCdd() && state.day != null ? dayMs(cddOf(prevModel).dates[state.day]) : null;
+    var wasCdd = inCdd();
+    if (shadeGroup(prevModel) !== shadeGroup(key)) {
+      state.lastShade[shadeGroup(prevModel)] = state.shade;
+      if (state.lastShade[shadeGroup(key)]) state.shade = state.lastShade[shadeGroup(key)];
+    }
     state.model = key;
     var d = M.models[key];
-    if (inCdd() && !cddOf(key)) {           // this model has no dry-day data (its analysis failed)
-      state.shade = state.prevShade || "speed" + M.levels[0];
-      shadeSel.value = state.shade;
+    if (wasCdd && !cddOf(key) && shadeGroup(key) === "nwp") state.shade = state.prevShade || "speed" + M.levels[0];
+    rebuildShadeOptions();
+    if (wasCdd && !inCdd() && shadeGroup(key) === "nwp") {     // this model has no dry-day data (its analysis failed)
       setStatus("No consecutive-dry-days layer for " + d.label);
       setTimeout(function () { setStatus(""); }, 2500);
     }
@@ -711,14 +739,9 @@ window.addEventListener("load", function () {
   el("wv-tabs").appendChild(eb);
 
   var shadeSel = el("wv-shade"), levelSel = el("wv-level");
-  M.levels.forEach(function (l) {
-    shadeSel.add(new Option("Wind speed " + l + " hPa", "speed" + l));
-    levelSel.add(new Option(l + " hPa", String(l)));
-  });
-  shadeSel.add(new Option("Rain", "rain"));
-  shadeSel.add(new Option("Relative humidity " + M.rhLevel + " hPa", "rh"));
-  if (models.some(cddOf)) shadeSel.add(new Option("Consecutive dry days", "cdd"));
-  shadeSel.value = state.shade; levelSel.value = String(state.level);
+  M.levels.forEach(function (l) { levelSel.add(new Option(l + " hPa", String(l))); });
+  rebuildShadeOptions();
+  levelSel.value = String(state.level);
   shadeSel.addEventListener("change", function () {
     var was = inCdd();
     if (!was) state.prevShade = state.shade;

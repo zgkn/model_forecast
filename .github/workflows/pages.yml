@@ -49,12 +49,30 @@ jobs:
           if git fetch -q --depth 1 origin data; then git checkout -q -B data FETCH_HEAD; fi
           ls -l
 
+      # CAMS (Atmosphere Data Store): the key is the same ADS key as in the AOD_PM repo
+      - name: Configure ADS credentials for CAMS
+        env:
+          CDSAPI_KEY: ${{ secrets.CDSAPI_KEY }}
+        run: |
+          if [ -n "$CDSAPI_KEY" ]; then
+            printf 'url: https://ads.atmosphere.copernicus.eu/api\nkey: %s\n' "$CDSAPI_KEY" > "$HOME/.cdsapirc"
+          else
+            echo "::warning title=CAMS::the CDSAPI_KEY secret is not set, so the CAMS tab will be left out"
+          fi
+
       # Time-boxed: ECMWF's server throttles right after a new run appears. If this step is slow or fails,
       # the site is still built from the cached run below and a later scheduled run catches up.
-      - name: Refresh ECMWF data (downloads only when there is a newer run)
-        timeout-minutes: 12
+      # CAMS queues its request on the ADS server, so it is fetched alongside the ECMWF downloads.
+      - name: Refresh data (downloads only when there is something newer)
+        timeout-minutes: 14
         continue-on-error: true
-        run: python wind_forecast.py --fetch-only
+        run: |
+          ( timeout 780 python wind_forecast.py --fetch-only --models cams 2>&1 | sed 's/^/[cams-job] /' ) &
+          cams=$!
+          status=0
+          python wind_forecast.py --fetch-only --models ifs aifs || status=$?
+          wait "$cams" || true
+          exit $status
 
       - name: Build site from the cache
         run: python wind_forecast.py --no-fetch --out site/index.html

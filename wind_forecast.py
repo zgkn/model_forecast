@@ -37,6 +37,7 @@ import xarray as xr
 from branca.element import Element
 from ecmwf.opendata import Client
 
+import cams
 import cdd
 
 HERE = Path(__file__).resolve().parent
@@ -49,6 +50,7 @@ NY = round((LAT_N - LAT_S) / STEP) + 1
 NX = round((LON_E - LON_W) / STEP) + 1
 FORMAT = 2  # bump when the cache layout changes
 REGION = [LAT_N, LAT_S, LON_W, LON_E, STEP, FORMAT]  # stored in cache files to detect changes
+GRID = cams.Grid(LAT_N, LAT_S, LON_W, LON_E, STEP)
 
 # Colour scales: class i is value >= edges[i-1] (class 0 is below the first edge).
 PALETTES = {
@@ -91,6 +93,16 @@ def _cdd_colors(n=15):
 
 PALETTES["cdd"] = {"unit": "days", "edges": list(range(1, 16)), "colors": _cdd_colors(),
                    "alpha": [0.0] + [0.8] * 15, "ticks": [1, 5, 10, 15]}
+
+# CAMS organic matter AOD at 550 nm: 0 .. 5 colour scale (top class is 5 and above)
+PALETTES["aod"] = {
+    "unit": "",
+    "edges": [0.1, 0.2, 0.3, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5],
+    "colors": ["#ffffff", "#ffffd4", "#fff0a8", "#fee391", "#fec44f", "#fe9929", "#ec7014",
+               "#cc4c02", "#993404", "#662506", "#6a3d9a", "#2d004b"],
+    "alpha": [0.0] + [0.78] * 11,
+    "ticks": [0.1, 0.3, 0.5, 1, 2, 3, 5],
+}
 
 CDD_STEP = 360  # the 15-day horizon
 DOWNLOAD_BUDGET_S = 420  # give up on a model's download after this long and use the cached run
@@ -401,6 +413,25 @@ def write_model(model, path, max_step, data_dir):
     }
 
 
+def write_cams(path, data_dir):
+    """Write the CAMS AOD data file; return its manifest entry (a model with only the AOD shading)."""
+    run, c = cams.run_of(path), cams.load_cache(path, GRID)
+    if c is None:
+        raise RuntimeError(f"{path.name} was written for another region; refresh the cache")
+    steps = c["steps"]
+    file = f"data/cams_{run:%Y%m%d%H}_aod.bin.gz"
+    (data_dir.parent / file).write_bytes(gz(c["aod_q"]))                  # uint8, steps x ny x nx, 0.02 per count
+    return {
+        "label": "CAMS", "long": "CAMS global forecast (organic matter AOD)",
+        "run": int(run.timestamp()), "steps": steps,
+        "valid": [int(run.timestamp()) + s * 3600 for s in steps],
+        "interval": [0] + [b - a for a, b in zip(steps, steps[1:])],
+        "files": {"aod": file},
+        "shading": [{"value": "aod", "label": "Organic matter AOD 550 nm"}],
+        "flow": False,
+    }
+
+
 def build_site(manifest, out_path):
     m = folium.Map(
         location=[(LAT_N + LAT_S) / 2, (LON_W + LON_E) / 2], zoom_start=5, min_zoom=4, max_zoom=10,
@@ -426,7 +457,8 @@ def build_site(manifest, out_path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--models", nargs="+", choices=list(MODELS), default=list(MODELS))
+    ap.add_argument("--models", nargs="+", choices=list(MODELS) + ["cams"], default=list(MODELS) + ["cams"],
+                    help="ifs and aifs (ECMWF open data, with the dry-days layer) and/or cams (needs ADS credentials)")
     ap.add_argument("--max-step", type=int, default=144, help="last forecast step in hours (default 144)")
     ap.add_argument("--source", default="google",
                     help="open-data mirror: google, aws, azure, ecmwf (default google; AWS answers 503 Slow Down "
@@ -440,8 +472,9 @@ def main():
     ap.add_argument("--out", type=Path, default=HERE / "output" / "index.html")
     args = ap.parse_args()
 
+    nwp = [m for m in args.models if m != "cams"]
     paths = {}
-    for model in args.models:
+    for model in nwp:
         if args.no_fetch:
             paths[model] = newest_cached(args.cache_dir, model)
             if paths[model] is None:
@@ -450,7 +483,7 @@ def main():
             paths[model] = refresh_or_cached(model, args.source, args.max_step, args.cache_dir, args.workers)
     cdd_paths = {}
     if not args.no_cdd and paths:
-        for model in args.models:        # a CDD problem must never stop the rest of the site
+        for model in nwp:                # a CDD problem must never stop the rest of the site
             try:
                 cdd_paths[model] = newest_cdd(args.cache_dir, model) if args.no_fetch else first_working(
                     args.source, lambda src: fetch_cdd(model, src, args.cache_dir, args.workers), f"{model} CDD")
@@ -458,6 +491,17 @@ def main():
                     warn(f"nothing cached for the {model} CDD layer")
             except Exception as e:
                 warn(f"{model} CDD data unavailable: {e}")
+    cams_path = None
+    if "cams" in args.models:            # like CDD: a problem here only leaves the CAMS tab out
+        try:
+            cams_path = cams.newest_cached(args.cache_dir) if args.no_fetch else cams.fetch(
+                args.cache_dir, GRID, log=lambda m: print(f"[cams] {m}", flush=True))
+            if cams_path is None:
+                warn("nothing cached for the CAMS tab")
+        except Exception as e:
+            cams_path = cams.newest_cached(args.cache_dir)
+            warn(f"CAMS could not be refreshed ({e})" + (f"; using the cached cycle {cams_path.stem.split('_')[1]}"
+                                                         if cams_path else "; the CAMS tab is left out"))
     for stale in args.cache_dir.glob("eps-*"):       # an earlier version cached EPSgram images here
         stale.unlink()
     if args.fetch_only:
@@ -493,9 +537,17 @@ def main():
             manifest["models"][model]["cdd"] = write_cdd(model, path, data_dir, land)
         except Exception as e:
             warn(f"{model} CDD layer left out: {e}")
+    if cams_path is not None:
+        try:
+            manifest["models"]["cams"] = write_cams(cams_path, data_dir)
+        except Exception as e:
+            cams_path = None
+            warn(f"CAMS tab left out: {e}")
     (data_dir / "coastlines.json").write_text((HERE / "coastlines.geojson").read_text())
     build_site(manifest, args.out)
     runs = {m: p.stem.split("_")[1] for m, p in paths.items()}
+    if cams_path is not None:
+        runs["cams"] = cams_path.stem.split("_")[1]
     (site / "runs.json").write_text(json.dumps(runs, sort_keys=True))
     total = sum(f.stat().st_size for f in site.rglob("*") if f.is_file())
     print(f"wrote {args.out} + {len(list(data_dir.iterdir()))} data files ({total / 1e6:.1f} MB total)")

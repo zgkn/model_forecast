@@ -10,3 +10,4 @@ scipy
 rasterio
 h5netcdf
 h5py
+cdsapi
