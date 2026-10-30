@@ -24,7 +24,7 @@ window.addEventListener("load", function () {
 
   function cddOf(m) { return M.models[m].cdd; }
   function inCdd() { return state.shade === "cdd"; }
-  function noFlow() { return inCdd() || state.shade === "aod"; }   // wind is not shown with these layers
+  function noFlow() { return inCdd() || (!!M.models[state.model].shading && !M.models[state.model].flowFrom); }   // no wind with these layers
   models.forEach(function (m) { if (cddOf(m)) M.models[m].files.cdd = cddOf(m).files.cdd; });
 
   // ---- data loading: one binary file per model and variable, fetched on demand -----------------
@@ -55,14 +55,24 @@ window.addEventListener("load", function () {
 
   function shadeKind() { return state.shade.indexOf("speed") === 0 ? "speed" : state.shade === "rain" ? "rain" : state.shade === "cdd" ? "cdd" : state.shade === "aod" ? "aod" : "rh"; }
   function shadeFile() { return state.shade === "rh" ? "rh" + M.rhLevel : state.shade; }
-  function neededFiles() {
-    if (inCdd()) return ["cdd"];
-    if (state.shade === "aod") return ["aod"];
-    var f = [shadeFile().replace(/^speed/, "uv")];
-    if (state.style !== "off") f.push("uv" + state.level);
-    return f.filter(function (n, i) { return f.indexOf(n) === i; });
+  function neededFiles() {                  // [model, file] pairs for the current frame
+    var m = state.model, f;
+    if (inCdd()) return [[m, "cdd"]];
+    f = state.shade === "aod" ? [[m, "aod"]] : [[m, shadeFile().replace(/^speed/, "uv")]];
+    if (state.style !== "off" && !noFlow()) f.push([flowModel(), "uv" + state.level]);
+    return f.filter(function (a, i) { return f.findIndex(function (b) { return b[0] === a[0] && b[1] === a[1]; }) === i; });
   }
   function get(name) { return arrays[state.model + "/" + name]; }
+
+  // CAMS has no wind of its own: it borrows the flow of another model at the same valid time
+  function flowModel() { return M.models[state.model].flowFrom || state.model; }
+  function flowIdx() {                      // frame of the flow model valid at the current time, or -1
+    var fm = flowModel();
+    if (fm === state.model) return state.t;
+    return M.models[fm].valid.indexOf(M.models[state.model].valid[state.t]);
+  }
+  function flowArr() { return arrays[flowModel() + "/uv" + state.level]; }
+  function flowBase() { var i = flowIdx(); return i < 0 ? -1 : i * 2 * N; }
 
   // ---- colour lookup tables ---------------------------------------------------------------------
   var LUTS = {};
@@ -247,7 +257,7 @@ window.addEventListener("load", function () {
   }
 
   function drawArrows(ctx, uv) {
-    var size = map.getSize(), b = state.t * 2 * N;
+    var size = map.getSize(), b = flowBase();
     var pxPerStep = G.d * 256 * Math.pow(2, map.getZoom()) / 360;
     var k = Math.max(1, Math.ceil(MIN_ARROW_PX / pxPerStep)), paths = [];
     for (var i = 0; i < NY; i += k) {
@@ -267,13 +277,12 @@ window.addEventListener("load", function () {
   var CELL = 11, STEP_PX = 2.5, MAX_STEPS = 260, MARGIN = 120, MIN_SPEED = 3;   // speeds in 0.1 m/s
 
   function computeStreams() {
-    var uv = get("uv" + state.level);
-    if (!uv) { streams = null; return; }
+    var uv = flowArr(), base = flowBase();
+    if (!uv || base < 0) { streams = null; return; }
     var size = map.getSize(), z = map.getZoom(), world = 256 * Math.pow(2, z), org = map.getPixelOrigin();
     var tl = map.containerPointToLayerPoint([0, 0]);
     var x0 = tl.x - MARGIN, y0 = tl.y - MARGIN, W = size.x + 2 * MARGIN, H = size.y + 2 * MARGIN;
     var cols = Math.ceil(W / CELL), rows = Math.ceil(H / CELL), occ = new Uint8Array(cols * rows);
-    var base = state.t * 2 * N;
 
     function cellOf(x, y) {
       var cx = Math.floor((x - x0) / CELL), cy = Math.floor((y - y0) / CELL);
@@ -358,9 +367,9 @@ window.addEventListener("load", function () {
 
   function drawFlow() {
     var ctx = flowLayer.begin();
-    if (state.style === "off" || noFlow()) return;     // wind has no meaning on the dry-day axis or for CAMS AOD
-    var uv = get("uv" + state.level);
-    if (!uv) return;
+    if (state.style === "off" || noFlow()) return;     // wind has no meaning on the dry-day axis
+    var uv = flowArr();
+    if (!uv || flowBase() < 0) return;
     if (state.style === "arrows") drawArrows(ctx, uv); else drawStreams(ctx);
   }
 
@@ -492,10 +501,10 @@ window.addEventListener("load", function () {
       }
     } else {
       var shadeArr = get(shadeFile().replace(/^speed/, "uv")) || get(shadeFile());
-      var uv = get("uv" + state.level);
-      if (uv && state.style !== "off" && sampleUV(uv, state.t * 2 * N, e.latlng.lng, e.latlng.lat)) {
+      var uv = noFlow() ? null : flowArr();
+      if (uv && flowBase() >= 0 && state.style !== "off" && sampleUV(uv, flowBase(), e.latlng.lng, e.latlng.lat)) {
         var kt = Math.hypot(su, sv) * 0.1 * KT, from = (270 - Math.atan2(sv, su) / RAD + 360) % 360;
-        parts.push(state.level + " hPa wind " + kt.toFixed(0) + " kt from " + String(Math.round(from) % 360).padStart(3, "0") + "°");
+        parts.push(state.level + " hPa " + (flowModel() === state.model ? "" : M.models[flowModel()].label + " ") + "wind " + kt.toFixed(0) + " kt from " + String(Math.round(from) % 360).padStart(3, "0") + "°");
       }
       if (shadeArr && shadeSrc && state.shade !== "speed" + state.level && gx >= 0 && gy >= 0 && gx <= NX - 1 && gy <= NY - 1) {
         var v = field[Math.round(gy) * NX + Math.round(gx)];
@@ -527,6 +536,12 @@ window.addEventListener("load", function () {
     }
     return validLabel(state.model, state.t);
   }
+  function flowNote() {                    // which model's wind is drawn on a tab that has none of its own
+    if (!M.models[state.model].flowFrom || state.style === "off") return "";
+    var f = M.models[flowModel()];
+    return " · " + state.level + " hPa wind: " + f.label + " " + fmt(f.run, { day: "2-digit", month: "short", hour: "2-digit" }) + "Z run" +
+      (flowIdx() < 0 ? " (not available at this time)" : "");
+  }
   function updateAxis() {
     var d = M.models[state.model], n = axisLen();
     slider.max = n - 1; slider.value = axisIdx();
@@ -539,7 +554,7 @@ window.addEventListener("load", function () {
     } else {
       el("wv-first").textContent = shortLabel(state.model, 0);
       el("wv-last").textContent = shortLabel(state.model, n - 1);
-      el("wv-run").textContent = d.long + " · run " + fmt(d.run, { day: "2-digit", month: "short", hour: "2-digit" }) + " UTC";
+      el("wv-run").textContent = d.long + " · run " + fmt(d.run, { day: "2-digit", month: "short", hour: "2-digit" }) + " UTC" + flowNote();
     }
   }
 
@@ -549,10 +564,10 @@ window.addEventListener("load", function () {
     var names = neededFiles(), tk = ++token;
     drawLegend(); updateAxis();
     el("wv-valid").textContent = timeLabel();
-    var missing = names.filter(function (n) { return !get(n); });
+    var missing = names.filter(function (a) { return !arrays[a[0] + "/" + a[1]]; });
     if (!missing.length) return render();
     setStatus("Loading…");
-    Promise.all(missing.map(function (n) { return load(state.model, n); })).then(function () {
+    Promise.all(missing.map(function (a) { return load(a[0], a[1]); })).then(function () {
       if (tk !== token) return;
       setStatus(""); render();
     }).catch(function (err) { if (tk === token) setStatus("Could not load data: " + err.message); });

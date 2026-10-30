@@ -51,6 +51,7 @@ NX = round((LON_E - LON_W) / STEP) + 1
 FORMAT = 2  # bump when the cache layout changes
 REGION = [LAT_N, LAT_S, LON_W, LON_E, STEP, FORMAT]  # stored in cache files to detect changes
 GRID = cams.Grid(LAT_N, LAT_S, LON_W, LON_E, STEP)
+FLOW_FOR_CAMS = "ifs"                 # model whose wind is drawn on the CAMS tab (3-hourly, like CAMS)
 
 # Colour scales: class i is value >= edges[i-1] (class 0 is below the first edge).
 PALETTES = {
@@ -428,7 +429,6 @@ def write_cams(path, data_dir):
         "interval": [0] + [b - a for a, b in zip(steps, steps[1:])],
         "files": {"aod": file},
         "shading": [{"value": "aod", "label": "Organic matter AOD 550 nm"}],
-        "flow": False,
     }
 
 
@@ -540,6 +540,8 @@ def main():
     if cams_path is not None:
         try:
             manifest["models"]["cams"] = write_cams(cams_path, data_dir)
+            if FLOW_FOR_CAMS in manifest["models"]:        # wind drawn over the AOD, matched by valid time
+                manifest["models"]["cams"]["flowFrom"] = FLOW_FOR_CAMS
         except Exception as e:
             cams_path = None
             warn(f"CAMS tab left out: {e}")

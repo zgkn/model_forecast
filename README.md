@@ -69,6 +69,10 @@ A **CAMS** tab shows the CAMS global forecast of organic matter aerosol optical 
   once. Locally put the key in `~/.cdsapirc` (`url: https://ads.atmosphere.copernicus.eu/api`, `key: ...`).
 * Without the key, or if the download fails, the tab is left out and the workflow logs a warning (the last cached
   cycle is reused if there is one). `--models ifs aifs` skips CAMS; `--models cams` is CAMS only.
+* The CAMS tab also draws the **ECMWF IFS wind** (arrows or streamlines, 925/850/700 hPa) on top of the AOD, for the
+  same valid time as the CAMS frame (both are 3-hourly, so the times match exactly). The wind comes from the latest IFS
+  run, so CAMS frames earlier than that run have no wind; the header then says "not available at this time". The
+  wind file of one level (~3.5 MB) is loaded only when the CAMS tab is shown.
 * Data: Generated using Copernicus Atmosphere Monitoring Service information.
 
 ## How it stays fast
