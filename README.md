@@ -84,10 +84,11 @@ current tab; click or drag on the charts to move the time slider. The places:
 |---|---|
 | Riau, Jambi, South Sumatra | provinces, Natural Earth admin-1 outlines |
 | West, Central, South Kalimantan | provinces, same source |
+| Cambodia | whole country, Natural Earth admin-0 outline (about 240 grid cells) |
 | Singapore | box, 0.5 x 0.5 degrees (the 2 x 2 grid cells around the island) |
 
-* **Outlines:** `regions.geojson` (20 KB) holds the province outlines, rounded and simplified to 0.01 degrees from Natural
-  Earth 10m admin-1 (public domain). `python tools/make_regions.py` rebuilds it; add a province by adding a line to
+* **Outlines:** `regions.geojson` (25 KB) holds the province and country outlines, rounded and simplified to 0.01 degrees
+  from Natural Earth 10m admin-1 and admin-0 (public domain). `python tools/make_regions.py` rebuilds it; add a province or country by adding a line to
   `REGIONS` there; the page picks it up with no other change.
   Natural Earth draws boundaries as it sees them, including in disputed areas.
 * **Weights:** every 0.25 degree grid cell gets the fraction of it that lies inside the outline (measured on a 0.025

@@ -869,10 +869,11 @@ window.addEventListener("load", function () {
   }
   if (SGP.length) {
     map.createPane("wv-sg"); map.getPane("wv-sg").style.zIndex = 440;
-    var psel = el("wv-sg-place"), groups = { region: "Provinces", box: "Boxes" }, og = {};
+    var psel = el("wv-sg-place"), og = {};
     SGP.forEach(function (p) {
-      if (!og[p.kind]) { og[p.kind] = document.createElement("optgroup"); og[p.kind].label = groups[p.kind] || p.kind; psel.appendChild(og[p.kind]); }
-      og[p.kind].appendChild(new Option(p.name, p.id));
+      var g = p.group || "Boxes";
+      if (!og[g]) { og[g] = document.createElement("optgroup"); og[g].label = g; psel.appendChild(og[g]); }
+      og[g].appendChild(new Option(p.name, p.id));
       if (p.kind !== "box") return;
       var rect = L.rectangle(p.box, Object.assign({ pane: "wv-sg" }, SG_STYLE));
       var hit = L.circleMarker(L.latLngBounds(p.box).getCenter(),     // a click target that stays usable when zoomed out

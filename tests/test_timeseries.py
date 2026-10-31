@@ -139,7 +139,7 @@ def test_the_shipped_places_are_valid_on_the_real_grid():
     places = ts.load_places(w.GRID)
     ids = [p["id"] for p in places]
     assert len(set(ids)) == len(ids) and "sg" in ids
-    assert {"riau", "jambi", "ssum", "wkal", "ckal", "skal"} <= set(ids)
+    assert {"riau", "jambi", "ssum", "wkal", "ckal", "skal", "khm"} <= set(ids)
     for p in places:
         assert p["w"].shape == (w.NY, w.NX) and p["w"].sum() >= 1.0, p["name"]
         s, west = p["box"][0]
@@ -147,4 +147,6 @@ def test_the_shipped_places_are_valid_on_the_real_grid():
         assert w.LAT_S <= s < n <= w.LAT_N and w.LON_W <= west < east <= w.LON_E, p["name"]
     sizes = {d["id"]: d["cells"] for d in ts.describe(places)}
     assert 100 < sizes["riau"] < 1000 and sizes["sg"] == 4.0
+    assert 200 < sizes["khm"] < 300                          # Cambodia, about 181,000 km2 of 28 x 28 km cells
+    assert {d["id"]: d["group"] for d in ts.describe(places)}["khm"] == "Countries"
     json.dumps(ts.describe(places))                         # serialisable for the manifest

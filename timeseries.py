@@ -71,7 +71,7 @@ def region_places(grid, path=REGIONS_FILE):
         w = region_weights(f["geometry"], grid)
         if w.sum() < EPS:
             raise ValueError(f"{f['properties']['name']} covers no cell of the map grid")
-        out.append({"id": f["properties"]["id"], "name": f["properties"]["name"], "kind": "region", "w": w,
+        out.append({"id": f["properties"]["id"], "name": f["properties"]["name"], "kind": "region", "group": f["properties"].get("group", "Provinces"), "w": w,
                     "box": _bounds(f["geometry"])})
     return out
 
@@ -87,8 +87,8 @@ def load_places(grid):
 
 def describe(places):
     """The part of each place the viewer needs: id, name, kind, outline box and the number of cells it covers."""
-    return [{"id": p["id"], "name": p["name"], "kind": p["kind"], "box": p["box"], "cells": round(float(p["w"].sum()), 1)}
-            for p in places]
+    return [{"id": p["id"], "name": p["name"], "kind": p["kind"], "group": p.get("group", "Boxes"), "box": p["box"],
+             "cells": round(float(p["w"].sum()), 1)} for p in places]
 
 
 class _Area:

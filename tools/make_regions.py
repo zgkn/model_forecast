@@ -1,29 +1,32 @@
-"""Builds ../regions.geojson: the province outlines used for the area time series (Natural Earth 10m admin-1, public domain).
+"""Builds ../regions.geojson: the province and country outlines used for the area time series (Natural Earth 10m, public domain).
 
-    python tools/make_regions.py [path/to/ne_10m_admin_1_states_provinces.geojson]
+    python tools/make_regions.py [--admin1 ne_10m_admin_1_states_provinces.geojson] [--admin0 ne_10m_admin_0_countries.geojson]
 
-Without an argument the file is downloaded from the natural-earth-vector repository (about 40 MB). Only the provinces
+Files that are not given are downloaded from the natural-earth-vector repository (about 40 MB and 13 MB). Only the areas
 listed in REGIONS are kept; their outlines are rounded to 0.01 degrees, simplified (Douglas-Peucker, 0.01 degree) and
-islands smaller than about 10 km2 are dropped, which leaves a few hundred KB.
+islands smaller than about 10 km2 are dropped, which leaves a few tens of KB.
 """
+import argparse
 import json
 import sys
 import urllib.request
 from pathlib import Path
 
-URL = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_1_states_provinces.geojson"
+BASE = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/"
+URLS = {"admin1": BASE + "ne_10m_admin_1_states_provinces.geojson", "admin0": BASE + "ne_10m_admin_0_countries.geojson"}
 OUT = Path(__file__).resolve().parent.parent / "regions.geojson"
 TOL = 0.01                      # simplification tolerance, degrees
 MIN_AREA = 0.001                # smallest ring kept, square degrees (about 12 km2 at the equator)
 
-# id: (Natural Earth country, Natural Earth name, display name)
+# id: (level, Natural Earth country (admin-1) / None, Natural Earth name, display name, menu group)
 REGIONS = {
-    "riau": ("Indonesia", "Riau", "Riau"),
-    "jambi": ("Indonesia", "Jambi", "Jambi"),
-    "ssum": ("Indonesia", "Sumatera Selatan", "South Sumatra"),
-    "wkal": ("Indonesia", "Kalimantan Barat", "West Kalimantan"),
-    "ckal": ("Indonesia", "Kalimantan Tengah", "Central Kalimantan"),
-    "skal": ("Indonesia", "Kalimantan Selatan", "South Kalimantan"),
+    "riau": ("admin1", "Indonesia", "Riau", "Riau", "Provinces"),
+    "jambi": ("admin1", "Indonesia", "Jambi", "Jambi", "Provinces"),
+    "ssum": ("admin1", "Indonesia", "Sumatera Selatan", "South Sumatra", "Provinces"),
+    "wkal": ("admin1", "Indonesia", "Kalimantan Barat", "West Kalimantan", "Provinces"),
+    "ckal": ("admin1", "Indonesia", "Kalimantan Tengah", "Central Kalimantan", "Provinces"),
+    "skal": ("admin1", "Indonesia", "Kalimantan Selatan", "South Kalimantan", "Provinces"),
+    "khm": ("admin0", None, "Cambodia", "Cambodia", "Countries"),
 }
 
 
@@ -73,18 +76,29 @@ def simplify(geom):
     return {"type": "MultiPolygon", "coordinates": out}
 
 
+def load(path, level):
+    return json.loads(Path(path).read_text()) if path else json.load(urllib.request.urlopen(URLS[level], timeout=300))
+
+
 def main():
-    src = Path(sys.argv[1]) if len(sys.argv) > 1 else None
-    data = json.loads(src.read_text()) if src else json.load(urllib.request.urlopen(URL, timeout=300))
-    by_name = {(f["properties"]["admin"], f["properties"]["name"]): f for f in data["features"]}
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--admin1")
+    ap.add_argument("--admin0")
+    args = ap.parse_args()
+    paths = {"admin1": args.admin1, "admin0": args.admin0}
+    index = {}
+    for level in {r[0] for r in REGIONS.values()}:
+        data = load(paths[level], level)
+        for f in data["features"]:
+            p = f["properties"]
+            index[(level, p.get("admin") if level == "admin1" else None, p["name"] if level == "admin1" else p["NAME"])] = f
     feats = []
-    for id_, (country, name, label) in REGIONS.items():
-        f = by_name.get((country, name))
+    for id_, (level, country, name, label, group) in REGIONS.items():
+        f = index.get((level, country, name))
         if f is None:
-            sys.exit(f"{country} / {name} not found in the admin-1 file")
+            sys.exit(f"{level} {country or ''} / {name} not found in the Natural Earth file")
         g = simplify(f["geometry"])
-        feats.append({"type": "Feature", "properties": {"id": id_, "name": label, "ne_name": name, "iso": f["properties"].get("iso_3166_2")},
-                      "geometry": g})
+        feats.append({"type": "Feature", "properties": {"id": id_, "name": label, "group": group, "ne_name": name}, "geometry": g})
         print(id_, label, len(g["coordinates"]), "polygons,", sum(len(r) for p in g["coordinates"] for r in p), "points")
     OUT.write_text(json.dumps({"type": "FeatureCollection", "features": feats}, separators=(",", ":")))
     print("wrote", OUT, OUT.stat().st_size // 1024, "KB")
