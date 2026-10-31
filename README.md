@@ -83,6 +83,9 @@ opens a panel with the box-average time series of the current tab; click or drag
 * IFS / AIFS: wind speed at 925 / 850 / 700 hPa (mean of the four cells' speeds; the readout also gives the direction of
   the mean wind), rain per model interval (3 h IFS, 6 h AIFS) as bars, RH at 700 hPa.
 * CAMS: organic matter AOD, and the IFS wind speed at the level chosen in the Flow menu.
+* Chips above the charts choose what is drawn (any combination; at least one stays on). IFS / AIFS: wind speed at each
+  level, wind direction, rain, rain total since +0 h, RH. CAMS: AOD, IFS wind speed, IFS wind direction. The choice is
+  remembered in the browser, separately for IFS/AIFS and for CAMS.
 * The numbers are computed at build time (`timeseries.py`) and embedded in the page (~3 KB per model), so the panel opens
   instantly and needs no extra download. On phones the panel is a sheet above the time slider.
 * To move the box, edit `PLACE` in `timeseries.py` (its nodes must be grid nodes: multiples of 0.25 degrees).

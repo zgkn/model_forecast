@@ -645,24 +645,70 @@ window.addEventListener("load", function () {
   var SVGNS = "http://www.w3.org/2000/svg";
   function pad3(n) { return String(n % 360).padStart(3, "0"); }
 
-  function sgSpec() {                       // the charts of the current tab
-    var d = M.models[state.model], s = d.sg;
+  // which variables are drawn: chips above the charts, remembered per kind of tab (IFS/AIFS share theirs)
+  var SG_VARS = {
+    nwp: [["w" + M.levels[0], M.levels[0] + " hPa wind"], ["w" + M.levels[1], M.levels[1] + " hPa wind"], ["w" + M.levels[2], M.levels[2] + " hPa wind"],
+          ["dir", "Wind direction"], ["rain", "Rain"], ["cum", "Rain total"], ["rh", "RH " + M.rhLevel + " hPa"]],
+    cams: [["aod", "Organic matter AOD"], ["ws", "IFS wind speed"], ["dir", "IFS wind direction"]]
+  };
+  var SG_DEFAULT = { nwp: ["w" + M.levels[0], "w" + M.levels[1], "w" + M.levels[2], "rain", "rh"], cams: ["aod", "ws"] };
+  var sgSel = {};
+  try { sgSel = JSON.parse(localStorage.getItem("wv-sg-vars") || "{}") || {}; } catch (e) { sgSel = {}; }
+  function sgGroup() { return M.models[state.model].shading ? "cams" : "nwp"; }
+  function sgChosen() {                     // chosen variable ids of this tab, only ones that exist
+    var g = sgGroup(), ids = SG_VARS[g].map(function (v) { return v[0]; });
+    var c = (Array.isArray(sgSel[g]) ? sgSel[g] : SG_DEFAULT[g]).filter(function (id) { return ids.indexOf(id) >= 0; });
+    return c.length ? c : SG_DEFAULT[g].slice();
+  }
+  function sgToggle(id) {
+    var g = sgGroup(), c = sgChosen(), k = c.indexOf(id);
+    if (k >= 0) { if (c.length === 1) return; c.splice(k, 1); } else c.push(id);
+    sgSel[g] = c;
+    try { localStorage.setItem("wv-sg-vars", JSON.stringify(sgSel)); } catch (e) { /* private mode: keep it for this visit */ }
+    sgRender();
+  }
+  function sgChips() {
+    var box = el("wv-sg-vars"), chosen = sgChosen();
+    box.innerHTML = "";
+    SG_VARS[sgGroup()].forEach(function (v) {
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = v[1];
+      b.setAttribute("aria-pressed", String(chosen.indexOf(v[0]) >= 0));
+      b.addEventListener("click", function () { sgToggle(v[0]); });
+      box.appendChild(b);
+    });
+  }
+
+  function sgSpec() {                       // the charts of the current tab, for the chosen variables
+    var d = M.models[state.model], s = d.sg, c = sgChosen(), has = function (id) { return c.indexOf(id) >= 0; };
     if (!s) return null;
+    var specs = [];
     if (d.shading) {                        // CAMS: its AOD, and the wind of the model it borrows
-      var specs = [{ title: "Organic matter AOD at 550 nm", kind: "line", floor: 1,
-                     series: [{ cls: "sg-aod", t: d.valid, v: s.aod }] }];
-      var f = d.flowFrom && M.models[d.flowFrom];
-      if (f && f.sg) specs.push({ title: f.label + " wind speed at " + state.level + " hPa (kt)", kind: "line", floor: 10,
-                                  series: [{ cls: "sg-l1", t: f.valid, v: f.sg.speed[state.level] }] });
+      var f = d.flowFrom && M.models[d.flowFrom], lv = state.level;
+      if (has("aod")) specs.push({ title: "Organic matter AOD at 550 nm", kind: "line", floor: 1, series: [{ cls: "sg-aod", t: d.valid, v: s.aod }] });
+      if (f && f.sg && has("ws")) specs.push({ title: f.label + " wind speed at " + lv + " hPa (kt)", kind: "line", floor: 10,
+                                               series: [{ cls: "sg-l1", t: f.valid, v: f.sg.speed[lv] }] });
+      if (f && f.sg && has("dir")) specs.push({ title: f.label + " wind direction at " + lv + " hPa (from, °)", kind: "dots", fixed: 360, ticks: [0, 90, 180, 270, 360],
+                                                series: [{ sw: "sw1", t: f.valid, v: f.sg.dir[lv] }] });
       return specs;
     }
+    var lvls = M.levels.filter(function (l) { return has("w" + l); });
+    if (lvls.length) specs.push({ title: "Wind speed (kt)", kind: "line", floor: 10,
+      series: lvls.map(function (l) { var i = M.levels.indexOf(l); return { cls: "sg-l" + (i + 1), sw: "sw" + (i + 1), label: l + " hPa", t: d.valid, v: s.speed[l] }; }) });
+    if (has("dir")) {
+      var dl = lvls.length ? lvls : [M.levels[0]];
+      specs.push({ title: "Wind direction (from, °)", kind: "dots", fixed: 360, ticks: [0, 90, 180, 270, 360],
+        series: dl.map(function (l) { var i = M.levels.indexOf(l); return { sw: "sw" + (i + 1), label: l + " hPa", t: d.valid, v: s.dir[l] }; }) });
+    }
     var iv = d.interval[1] || 3;
-    return [
-      { title: "Wind speed (kt)", kind: "line", floor: 10,
-        series: M.levels.map(function (l, i) { return { cls: "sg-l" + (i + 1), sw: "sw" + (i + 1), label: l + " hPa", t: d.valid, v: s.speed[l] }; }) },
-      { title: "Rain in the preceding " + iv + " h (mm)", kind: "bar", floor: 1, series: [{ t: d.valid, v: s.rain, iv: d.interval }] },
-      { title: "Relative humidity at " + M.rhLevel + " hPa (%)", kind: "line", fixed: 100, series: [{ cls: "sg-rh", t: d.valid, v: s.rh }] }
-    ];
+    if (has("rain")) specs.push({ title: "Rain in the preceding " + iv + " h (mm)", kind: "bar", floor: 1, series: [{ t: d.valid, v: s.rain, iv: d.interval }] });
+    if (has("cum")) {
+      var acc = 0;
+      specs.push({ title: "Rain total since +0 h (mm)", kind: "line", floor: 5,
+        series: [{ cls: "sg-bar-line", t: d.valid, v: s.rain.map(function (r) { acc += r; return +acc.toFixed(2); }) }] });
+    }
+    if (has("rh")) specs.push({ title: "Relative humidity at " + M.rhLevel + " hPa (%)", kind: "line", fixed: 100, series: [{ cls: "sg-rh", t: d.valid, v: s.rh }] });
+    return specs;
   }
   function niceMax(v, floor) {
     var m = Math.max(v, floor), p = Math.pow(10, Math.floor(Math.log10(m)));
@@ -680,8 +726,9 @@ window.addEventListener("load", function () {
     var d = M.models[state.model], specs = sgSpec(), box = el("wv-sg-chart");
     el("wv-sg-title").textContent = SGD.name + " · box average";
     el("wv-sg-sub").textContent = d.label + " · times in UTC";
+    sgChips();
     box.innerHTML = ""; sgGeo = null;
-    if (!specs) return;
+    if (!specs || !specs.length) return;
     var W = Math.max(240, box.clientWidth), PL = 30, PR = 6, PH = window.innerWidth < 760 ? 40 : 54, GAP = 22, AX = 16;
     var t0 = d.valid[0], t1 = d.valid[d.valid.length - 1], span = Math.max(1, t1 - t0), pw = W - PL - PR;
     var H = specs.length * (PH + GAP) + AX;
@@ -708,7 +755,7 @@ window.addEventListener("load", function () {
         svg.appendChild(svgEl("rect", { "class": se.sw, x: lx, y: y0 - 17, width: 8, height: 8, rx: 2 }));
         svg.appendChild(svgEl("text", { x: lx + 11, y: y0 - 9 }, se.label));
       });
-      [0, vmax / 2, vmax].forEach(function (v) {
+      (sp.ticks || [0, vmax / 2, vmax]).forEach(function (v) {
         svg.appendChild(svgEl("line", { "class": "sg-grid", x1: PL, x2: W - PR, y1: Y(v), y2: Y(v) }));
         svg.appendChild(svgEl("text", { x: PL - 4, y: Y(v) + 3, "text-anchor": "end" }, String(+v.toFixed(2))));
       });
@@ -719,6 +766,12 @@ window.addEventListener("load", function () {
             if (!se.iv[i] || v <= 0) return;
             var xa = X(se.t[i] - se.iv[i] * 3600), xb = X(se.t[i]);
             svg.appendChild(svgEl("rect", { "class": "sg-bar", x: xa + 0.5, y: Y(v), width: Math.max(1, xb - xa - 1), height: y0 + PH - Y(v) }));
+          });
+          return;
+        }
+        if (sp.kind === "dots") {
+          se.v.forEach(function (v, i) {
+            if (se.t[i] >= t0 && se.t[i] <= t1) svg.appendChild(svgEl("circle", { "class": se.sw, cx: X(se.t[i]).toFixed(1), cy: Y(v).toFixed(1), r: 1.7 }));
           });
           return;
         }
