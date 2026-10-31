@@ -75,20 +75,30 @@ A **CAMS** tab shows the CAMS global forecast of organic matter aerosol optical 
   wind file of one level (~3.5 MB) is loaded only when the CAMS tab is shown.
 * Data: Generated using Copernicus Atmosphere Monitoring Service information.
 
-## Singapore time series
+## Time series boxes
 
-A dashed box over Singapore (the 2 x 2 grid cells at 1.25-1.5 N, 103.75-104.0 E, i.e. 1.125-1.625 N, 103.625-104.125 E)
-opens a panel with the box-average time series of the current tab; click or drag on the charts to move the time slider.
+Dashed boxes on the map open a panel with the box-average time series of the current tab. Click a box (or pick the place
+in the panel's menu); click or drag on the charts to move the time slider. The places (`PLACES` in `timeseries.py`):
 
-* IFS / AIFS: wind speed at 925 / 850 / 700 hPa (mean of the four cells' speeds; the readout also gives the direction of
+| Place | Box |
+|---|---|
+| Singapore | 0.5 degree (2 x 2 grid cells), 1.125-1.625 N, 103.625-104.125 E |
+| South Sumatra (OKI peatlands) | 1 degree (4 x 4 cells), 3.625-2.625 S, 104.875-105.875 E |
+| Central Kalimantan (Kapuas peatlands) | 1 degree, 3.125-2.125 S, 113.625-114.625 E |
+| West Kalimantan (Ketapang peatlands) | 1 degree, 1.875-0.875 S, 109.875-110.875 E |
+
+* The box is a block of whole grid cells, so the average is the plain mean of those nodes. A test checks that every place
+  is on the grid and at least 75 % land (the last box was moved inland for that reason).
+* IFS / AIFS: wind speed at 925 / 850 / 700 hPa (mean of the cells' speeds; the readout also gives the direction of
   the mean wind), rain per model interval (3 h IFS, 6 h AIFS) as bars, RH at 700 hPa.
 * CAMS: organic matter AOD, and the IFS wind speed at the level chosen in the Flow menu.
 * Chips above the charts choose what is drawn (any combination; at least one stays on). IFS / AIFS: wind speed at each
   level, wind direction, rain, rain total since +0 h, RH. CAMS: AOD, IFS wind speed, IFS wind direction. The choice is
   remembered in the browser, separately for IFS/AIFS and for CAMS.
-* The numbers are computed at build time (`timeseries.py`) and embedded in the page (~3 KB per model), so the panel opens
-  instantly and needs no extra download. On phones the panel is a sheet above the time slider.
-* To move the box, edit `PLACE` in `timeseries.py` (its nodes must be grid nodes: multiples of 0.25 degrees).
+* The numbers are computed at build time (`timeseries.py`) and embedded in the page (~8 KB per place), so the panel
+  opens instantly and needs no extra download. Measured: up to ~200 boxes made no difference to panning; ~1000 did.
+* To change or add a place, edit `PLACES` (nodes must be multiples of 0.25 degrees). On phones the panel is a sheet
+  above the time slider.
 
 ## How it stays fast
 

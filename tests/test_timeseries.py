@@ -63,3 +63,14 @@ def test_aod_series():
     aod[:, 6:8, 3:5] = np.array([0.5, 1.0, 1.5])[:, None, None]
     aod[:, 0, 0] = 5                                        # outside the box, must not count
     assert ts.aod_series(aod, GRID, PLACE) == {"aod": [0.5, 1.0, 1.5]}
+
+
+def test_all_places_are_grid_nodes_inside_the_map_and_mostly_land():
+    import json
+    import cdd
+    import wind_forecast as w
+    land = cdd.land_mask(json.loads(w.LAND_FILE.read_text()), w.LAT_N, w.LON_W, w.STEP, w.NY, w.NX)
+    assert len({p["id"] for p in ts.PLACES}) == len(ts.PLACES)
+    for pl in ts.PLACES:
+        rows, cols = ts.cells(w.GRID, pl)                   # raises when off the grid / not a node
+        assert land[np.ix_(rows, cols)].mean() >= 0.75, f"{pl['name']} is mostly sea"

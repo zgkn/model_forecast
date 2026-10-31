@@ -641,7 +641,9 @@ window.addEventListener("load", function () {
   }
 
   // ---- Singapore box: click it for the box-average time series of the current tab -----------------------------------
-  var SGD = M.sg, sgOpen = false, sgSig = "", sgGeo = null, sgHovering = false;
+  var SGP = M.places || [], sgPlace = SGP.length ? SGP[0].id : null, sgOpen = false, sgSig = "", sgGeo = null, sgHovering = false;
+  function sgOf(d) { return d && d.sg ? d.sg[sgPlace] : null; }          // series of the selected place in a model
+  function sgPlaceObj() { return SGP.filter(function (p) { return p.id === sgPlace; })[0]; }
   var SVGNS = "http://www.w3.org/2000/svg";
   function pad3(n) { return String(n % 360).padStart(3, "0"); }
 
@@ -680,16 +682,17 @@ window.addEventListener("load", function () {
   }
 
   function sgSpec() {                       // the charts of the current tab, for the chosen variables
-    var d = M.models[state.model], s = d.sg, c = sgChosen(), has = function (id) { return c.indexOf(id) >= 0; };
+    var d = M.models[state.model], s = sgOf(d), c = sgChosen(), has = function (id) { return c.indexOf(id) >= 0; };
     if (!s) return null;
     var specs = [];
     if (d.shading) {                        // CAMS: its AOD, and the wind of the model it borrows
       var f = d.flowFrom && M.models[d.flowFrom], lv = state.level;
       if (has("aod")) specs.push({ title: "Organic matter AOD at 550 nm", kind: "line", floor: 1, series: [{ cls: "sg-aod", t: d.valid, v: s.aod }] });
-      if (f && f.sg && has("ws")) specs.push({ title: f.label + " wind speed at " + lv + " hPa (kt)", kind: "line", floor: 10,
-                                               series: [{ cls: "sg-l1", t: f.valid, v: f.sg.speed[lv] }] });
-      if (f && f.sg && has("dir")) specs.push({ title: f.label + " wind direction at " + lv + " hPa (from, °)", kind: "dots", fixed: 360, ticks: [0, 90, 180, 270, 360],
-                                                series: [{ sw: "sw1", t: f.valid, v: f.sg.dir[lv] }] });
+      var fs = sgOf(f);
+      if (fs && has("ws")) specs.push({ title: f.label + " wind speed at " + lv + " hPa (kt)", kind: "line", floor: 10,
+                                               series: [{ cls: "sg-l1", t: f.valid, v: fs.speed[lv] }] });
+      if (fs && has("dir")) specs.push({ title: f.label + " wind direction at " + lv + " hPa (from, °)", kind: "dots", fixed: 360, ticks: [0, 90, 180, 270, 360],
+                                                series: [{ sw: "sw1", t: f.valid, v: fs.dir[lv] }] });
       return specs;
     }
     var lvls = M.levels.filter(function (l) { return has("w" + l); });
@@ -722,10 +725,11 @@ window.addEventListener("load", function () {
   }
 
   function sgRender() {
-    sgSig = state.model + "/" + state.level;
+    sgSig = state.model + "/" + state.level + "/" + sgPlace;
     var d = M.models[state.model], specs = sgSpec(), box = el("wv-sg-chart");
-    el("wv-sg-title").textContent = SGD.name + " · box average";
-    el("wv-sg-sub").textContent = d.label + " · times in UTC";
+    var pl = sgPlaceObj(), bx = pl.box;
+    el("wv-sg-place").value = sgPlace;
+    el("wv-sg-sub").textContent = d.label + " · " + +(bx[1][0] - bx[0][0]).toFixed(2) + "° box average · times in UTC";
     sgChips();
     box.innerHTML = ""; sgGeo = null;
     if (!specs || !specs.length) return;
@@ -734,7 +738,7 @@ window.addEventListener("load", function () {
     var H = specs.length * (PH + GAP) + AX;
     function X(t) { return PL + (t - t0) / span * pw; }
     var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H, role: "img",
-                             "aria-label": "Time series at " + SGD.name + " for the " + d.label + " tab" });
+                             "aria-label": "Time series at " + pl.name + " for the " + d.label + " tab" });
     var midnights = [];
     for (var t = Math.ceil(t0 / 86400) * 86400; t <= t1; t += 86400) midnights.push(t);
     var stride = Math.max(1, Math.ceil(midnights.length * 46 / pw));
@@ -811,11 +815,11 @@ window.addEventListener("load", function () {
   }
 
   function sgText(i) {
-    var d = M.models[state.model], s = d.sg, p = [fmt(d.valid[i], { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) + "Z"];
+    var d = M.models[state.model], s = sgOf(d), p = [fmt(d.valid[i], { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) + "Z"];
     if (d.shading) {
       p.push("AOD " + s.aod[i].toFixed(2));
-      var f = d.flowFrom && M.models[d.flowFrom], j = f && f.sg ? f.valid.indexOf(d.valid[i]) : -1;
-      if (j >= 0) p.push(f.label + " " + state.level + " hPa wind " + Math.round(f.sg.speed[state.level][j]) + " kt from " + pad3(f.sg.dir[state.level][j]) + "°");
+      var f = d.flowFrom && M.models[d.flowFrom], fs = sgOf(f), j = fs ? f.valid.indexOf(d.valid[i]) : -1;
+      if (j >= 0) p.push(f.label + " " + state.level + " hPa wind " + Math.round(fs.speed[state.level][j]) + " kt from " + pad3(fs.dir[state.level][j]) + "°");
     } else {
       M.levels.forEach(function (l) { p.push(l + " hPa " + Math.round(s.speed[l][i]) + " kt from " + pad3(s.dir[l][i]) + "°"); });
       if (d.interval[i]) p.push("rain " + s.rain[i].toFixed(1) + " mm in " + d.interval[i] + " h");
@@ -831,7 +835,7 @@ window.addEventListener("load", function () {
       line.setAttribute("x1", x); line.setAttribute("x2", x);
       line.setAttribute("visibility", i == null ? "hidden" : "visible");
     }
-    el("wv-sg-read").textContent = M.models[state.model].sg ? sgText(i == null ? state.t : i) : "";
+    el("wv-sg-read").textContent = sgOf(M.models[state.model]) ? sgText(i == null ? state.t : i) : "";
   }
   function sgNow() {                        // marker of the frame shown on the map
     var line = document.getElementById("wv-sg-now");
@@ -839,23 +843,41 @@ window.addEventListener("load", function () {
     var x = sgGeo.X(M.models[state.model].valid[state.t]);
     line.setAttribute("x1", x); line.setAttribute("x2", x);
     line.setAttribute("visibility", inCdd() ? "hidden" : "visible");
-    if (!sgHovering) el("wv-sg-read").textContent = M.models[state.model].sg ? sgText(state.t) : "";
+    if (!sgHovering) el("wv-sg-read").textContent = sgOf(M.models[state.model]) ? sgText(state.t) : "";
   }
   function sgUpdate() {
     if (!sgOpen) return;
-    if (sgSig !== state.model + "/" + state.level) sgRender(); else sgNow();
+    if (sgSig !== state.model + "/" + state.level + "/" + sgPlace) sgRender(); else sgNow();
   }
-  function sgShow(open) {
+  var sgLayers = {};                        // place id -> {rect, hit}
+  var SG_LABEL_SIDE = { ssum: "left", ckal: "right" };
+  function sgStyle() {                      // the box of the place shown in the panel is drawn solid and heavier
+    SGP.forEach(function (p) {
+      var on = sgOpen && p.id === sgPlace;
+      sgLayers[p.id].rect.setStyle(on ? { weight: 3, dashArray: null, fillOpacity: 0.3 } : { weight: 2, dashArray: "4 3", fillOpacity: 0.15 });
+    });
+  }
+  function sgShow(open, id) {
+    if (id) sgPlace = id;
     sgOpen = open; el("wv-sg").hidden = !open; sgSig = "";
     if (open) sgRender();
+    sgStyle();
   }
-  if (SGD) {
+  if (SGP.length) {
     map.createPane("wv-sg"); map.getPane("wv-sg").style.zIndex = 440;
-    var sgRect = L.rectangle(SGD.box, { pane: "wv-sg", color: "#1a1a19", weight: 2, dashArray: "4 3", fillColor: "#ffffff", fillOpacity: 0.15 });
-    var sgHit = L.circleMarker(L.latLngBounds(SGD.box).getCenter(),   // a click target that stays usable when zoomed out
-      { pane: "wv-sg", radius: 16, stroke: false, fillColor: "#ffffff", fillOpacity: 0.01 });
-    [sgRect, sgHit].forEach(function (l) { l.addTo(map); l.on("click", function () { sgShow(true); }); });
-    sgHit.bindTooltip(SGD.name, { permanent: true, direction: "top", offset: [0, -12], className: "wv-sg-label" });
+    var psel = el("wv-sg-place");
+    SGP.forEach(function (p) {
+      psel.add(new Option(p.name, p.id));
+      var rect = L.rectangle(p.box, { pane: "wv-sg", color: "#1a1a19", weight: 2, dashArray: "4 3", fillColor: "#ffffff", fillOpacity: 0.15 });
+      var hit = L.circleMarker(L.latLngBounds(p.box).getCenter(),     // a click target that stays usable when zoomed out
+        { pane: "wv-sg", radius: 16, stroke: false, fillColor: "#ffffff", fillOpacity: 0.01 });
+      [rect, hit].forEach(function (l) { l.addTo(map); l.on("click", function () { sgShow(true, p.id); }); });
+      var side = SG_LABEL_SIDE[p.id] || "top";        // labels placed so neighbouring boxes do not cover each other
+      hit.bindTooltip(p.name.split(" (")[0], { permanent: true, direction: side, className: "wv-sg-label",
+        offset: side === "top" ? [0, -12] : side === "left" ? [-12, 0] : side === "right" ? [12, 0] : [0, 12] });
+      sgLayers[p.id] = { rect: rect, hit: hit };
+    });
+    psel.addEventListener("change", function () { sgShow(true, psel.value); });
     el("wv-sg-close").addEventListener("click", function () { sgShow(false); });
     window.addEventListener("resize", function () { if (sgOpen) { sgSig = ""; sgUpdate(); } });
   }

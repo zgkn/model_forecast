@@ -6,7 +6,20 @@ interpolation). Everything is returned as plain rounded lists that go straight i
 import numpy as np
 
 KT = 1.943844                                   # m/s -> knots
-PLACE = {"name": "Singapore", "lats": [1.5, 1.25], "lons": [103.75, 104.0]}   # grid nodes of the box (2 x 2 cells)
+
+def _block(name, id_, lat_n, lon_w, n):
+    """A box of n x n grid cells whose north-west node is (lat_n, lon_w)."""
+    return {"id": id_, "name": name, "lats": [lat_n - 0.25 * i for i in range(n)], "lons": [lon_w + 0.25 * i for i in range(n)]}
+
+
+# the places of the time-series boxes; every node is a grid node (multiples of 0.25 degrees)
+PLACES = [
+    _block("Singapore", "sg", 1.5, 103.75, 2),                                    # 0.5 degree box
+    _block("South Sumatra (OKI peatlands)", "ssum", -2.75, 105.0, 4),             # 1 degree boxes in the fire-prone peatlands
+    _block("Central Kalimantan (Kapuas peatlands)", "ckal", -2.25, 113.75, 4),
+    _block("West Kalimantan (Ketapang peatlands)", "wkal", -1.0, 110.0, 4),
+]
+PLACE = PLACES[0]
 
 
 def cells(grid, place=PLACE):
