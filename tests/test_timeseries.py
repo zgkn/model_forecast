@@ -6,7 +6,7 @@ import cams
 import timeseries as ts
 
 GRID = cams.Grid(lat_n=3.0, lat_s=0.0, lon_w=103.0, lon_e=105.0, step=0.25)      # 13 x 9 nodes
-PLACE = {"name": "Test", "lats": [1.5, 1.25], "lons": [103.75, 104.0]}
+PLACE = {"name": "Test", "south": 1.125, "north": 1.625, "west": 103.625, "east": 104.125}
 
 
 def test_cells_and_box():
@@ -14,11 +14,17 @@ def test_cells_and_box():
     assert ts.box(GRID, PLACE) == [[1.125, 103.625], [1.625, 104.125]]
 
 
-def test_cells_outside_or_off_grid():
+def test_cells_include_the_nodes_on_the_edges():
+    place = {"name": "Wide", "south": 1.0, "north": 2.0, "west": 103.0, "east": 104.0}
+    rows, cols = ts.cells(GRID, place)
+    assert rows == [4, 5, 6, 7, 8] and cols == [0, 1, 2, 3, 4]        # 2.0 .. 1.0 N and 103.0 .. 104.0 E, both edges in
+
+
+def test_cells_outside_or_empty():
     with pytest.raises(ValueError, match="outside"):
-        ts.cells(GRID, {"name": "X", "lats": [9.0], "lons": [103.5]})
-    with pytest.raises(ValueError, match="not a grid node"):
-        ts.cells(GRID, {"name": "X", "lats": [1.4], "lons": [103.5]})
+        ts.cells(GRID, {"name": "X", "south": 8.0, "north": 9.0, "west": 103.5, "east": 104.0})
+    with pytest.raises(ValueError, match="no grid node"):
+        ts.cells(GRID, {"name": "X", "south": 1.30, "north": 1.40, "west": 103.5, "east": 104.0})
 
 
 def fields(steps=4):
@@ -65,12 +71,10 @@ def test_aod_series():
     assert ts.aod_series(aod, GRID, PLACE) == {"aod": [0.5, 1.0, 1.5]}
 
 
-def test_all_places_are_grid_nodes_inside_the_map_and_mostly_land():
-    import json
-    import cdd
+def test_all_places_lie_inside_the_map_and_have_cells():
     import wind_forecast as w
-    land = cdd.land_mask(json.loads(w.LAND_FILE.read_text()), w.LAT_N, w.LON_W, w.STEP, w.NY, w.NX)
     assert len({p["id"] for p in ts.PLACES}) == len(ts.PLACES)
     for pl in ts.PLACES:
-        rows, cols = ts.cells(w.GRID, pl)                   # raises when off the grid / not a node
-        assert land[np.ix_(rows, cols)].mean() >= 0.75, f"{pl['name']} is mostly sea"
+        rows, cols = ts.cells(w.GRID, pl)                   # raises when outside the map or empty
+        assert len(rows) * len(cols) >= 4, pl["name"]
+        assert pl["south"] < pl["north"] and pl["west"] < pl["east"]

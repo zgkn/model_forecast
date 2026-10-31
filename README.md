@@ -82,22 +82,22 @@ in the panel's menu); click or drag on the charts to move the time slider. The p
 
 | Place | Box |
 |---|---|
-| Singapore | 0.5 degree (2 x 2 grid cells), 1.125-1.625 N, 103.625-104.125 E |
-| South Sumatra (OKI peatlands) | 1 degree (4 x 4 cells), 3.625-2.625 S, 104.875-105.875 E |
-| Central Kalimantan (Kapuas peatlands) | 1 degree, 3.125-2.125 S, 113.625-114.625 E |
-| West Kalimantan (Ketapang peatlands) | 1 degree, 1.875-0.875 S, 109.875-110.875 E |
+| Singapore | 0.5 x 0.5 degrees (the 2 x 2 grid cells around the island), 1.125-1.625 N, 103.625-104.125 E |
+| Sumatra box | 95-106 E, 5 S-0 (11 x 5 degrees) |
+| Kalimantan box | 109-115 E, 4 S-0 (6 x 4 degrees) |
 
-* The box is a block of whole grid cells, so the average is the plain mean of those nodes. A test checks that every place
-  is on the grid and at least 75 % land (the last box was moved inland for that reason).
+* A place is a rectangle given by its edges (`PLACES` in `timeseries.py`). Its average is the plain mean of the 0.25 degree
+  grid nodes inside it, nodes on the edges included, sea and land alike (the Sumatra box contains a lot of ocean).
+  A test checks that every place lies inside the map and contains grid nodes.
 * IFS / AIFS: wind speed at 925 / 850 / 700 hPa (mean of the cells' speeds; the readout also gives the direction of
   the mean wind), rain per model interval (3 h IFS, 6 h AIFS) as bars, RH at 700 hPa.
 * CAMS: organic matter AOD, and the IFS wind speed at the level chosen in the Flow menu.
 * Chips above the charts choose what is drawn (any combination; at least one stays on). IFS / AIFS: wind speed at each
   level, wind direction, rain, rain total since +0 h, RH. CAMS: AOD, IFS wind speed, IFS wind direction. The choice is
   remembered in the browser, separately for IFS/AIFS and for CAMS.
-* The numbers are computed at build time (`timeseries.py`) and embedded in the page (~8 KB per place), so the panel
+* The numbers are computed at build time (`timeseries.py`) and embedded in the page (about 3 KB per place), so the panel
   opens instantly and needs no extra download. Measured: up to ~200 boxes made no difference to panning; ~1000 did.
-* To change or add a place, edit `PLACES` (nodes must be multiples of 0.25 degrees). On phones the panel is a sheet
+* To change or add a place, edit `PLACES` (the edges just have to lie inside the map). On phones the panel is a sheet
   above the time slider.
 
 ## How it stays fast

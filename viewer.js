@@ -729,7 +729,7 @@ window.addEventListener("load", function () {
     var d = M.models[state.model], specs = sgSpec(), box = el("wv-sg-chart");
     var pl = sgPlaceObj(), bx = pl.box;
     el("wv-sg-place").value = sgPlace;
-    el("wv-sg-sub").textContent = d.label + " · " + +(bx[1][0] - bx[0][0]).toFixed(2) + "° box average · times in UTC";
+    el("wv-sg-sub").textContent = d.label + " · " + +(bx[1][1] - bx[0][1]).toFixed(2) + "° × " + +(bx[1][0] - bx[0][0]).toFixed(2) + "° box average · times in UTC";
     sgChips();
     box.innerHTML = ""; sgGeo = null;
     if (!specs || !specs.length) return;
