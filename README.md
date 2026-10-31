@@ -85,10 +85,12 @@ current tab; click or drag on the charts to move the time slider. The places:
 | Riau, Jambi, South Sumatra | provinces, Natural Earth admin-1 outlines |
 | West, Central, South Kalimantan | provinces, same source |
 | Cambodia | whole country, Natural Earth admin-0 outline (about 240 grid cells) |
+| Kota Tinggi, Mersing (Johor) | districts, geoBoundaries ADM2 outlines (about 4.5 and 3.6 grid cells) |
 | Singapore | box, 0.5 x 0.5 degrees (the 2 x 2 grid cells around the island) |
 
-* **Outlines:** `regions.geojson` (25 KB) holds the province and country outlines, rounded and simplified to 0.01 degrees
-  from Natural Earth 10m admin-1 and admin-0 (public domain). `python tools/make_regions.py` rebuilds it; add a province or country by adding a line to
+* **Outlines:** `regions.geojson` (27 KB) holds the province, country and district outlines, rounded and simplified to 0.01
+  degrees from Natural Earth 10m admin-1 and admin-0 (public domain) and, for the Johor districts, geoBoundaries gbOpen ADM2
+  (CC BY 4.0, https://www.geoboundaries.org; credited in the page footer). `python tools/make_regions.py` rebuilds it; add a province or country by adding a line to
   `REGIONS` there; the page picks it up with no other change.
   Natural Earth draws boundaries as it sees them, including in disputed areas.
 * **Weights:** every 0.25 degree grid cell gets the fraction of it that lies inside the outline (measured on a 0.025
@@ -98,6 +100,8 @@ current tab; click or drag on the charts to move the time slider. The places:
 * **Max tab:** the largest value among the cells that are at least half inside the area (the best covered cell for a
   tiny area). Rain total is the largest per-cell total, not the sum of per-step maxima. There is no maximum of wind
   directions, so that variable is hidden on this tab.
+* **Small areas:** a district of 3000-3500 km2 is only 3-5 model cells, so its mean is a blend of a few cells and its max
+  is one of very few; read them as "the model's value around there", not as a district-wide result.
 * **Remember:** the cells are 0.25 degree model grid cells (about 28 km), so a province maximum is a model-grid maximum,
   smoother than a station would see, and larger provinces have more cells to produce a high maximum.
 * IFS / AIFS: wind speed at 925 / 850 / 700 hPa, wind direction, rain per model interval (3 h IFS, 6 h AIFS) as bars,

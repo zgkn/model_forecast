@@ -877,7 +877,7 @@ window.addEventListener("load", function () {
       if (p.kind !== "box") return;
       var rect = L.rectangle(p.box, Object.assign({ pane: "wv-sg" }, SG_STYLE));
       var hit = L.circleMarker(L.latLngBounds(p.box).getCenter(),     // a click target that stays usable when zoomed out
-        { pane: "wv-sg", radius: 16, stroke: false, fillColor: "#ffffff", fillOpacity: 0.01 });
+        { pane: "wv-sg", radius: 9, stroke: false, fillColor: "#ffffff", fillOpacity: 0.01 });   // small, so it never covers the districts next to it
       [rect, hit].forEach(function (l) { l.addTo(map); l.on("click", function () { sgShow(true, p.id); }); });
       sgLayers[p.id] = rect;
     });

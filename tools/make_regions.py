@@ -1,8 +1,10 @@
 """Builds ../regions.geojson: the province and country outlines used for the area time series (Natural Earth 10m, public domain).
 
     python tools/make_regions.py [--admin1 ne_10m_admin_1_states_provinces.geojson] [--admin0 ne_10m_admin_0_countries.geojson]
+                                 [--mys2 geoBoundaries-MYS-ADM2_simplified.geojson]
 
-Files that are not given are downloaded from the natural-earth-vector repository (about 40 MB and 13 MB). Only the areas
+Districts come from geoBoundaries (gbOpen, CC BY 4.0, https://www.geoboundaries.org), the rest from Natural Earth.
+Files that are not given are downloaded from the natural-earth-vector / geoBoundaries repositories (about 40, 13 and 1 MB). Only the areas
 listed in REGIONS are kept; their outlines are rounded to 0.01 degrees, simplified (Douglas-Peucker, 0.01 degree) and
 islands smaller than about 10 km2 are dropped, which leaves a few tens of KB.
 """
@@ -13,7 +15,8 @@ import urllib.request
 from pathlib import Path
 
 BASE = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/"
-URLS = {"admin1": BASE + "ne_10m_admin_1_states_provinces.geojson", "admin0": BASE + "ne_10m_admin_0_countries.geojson"}
+URLS = {"admin1": BASE + "ne_10m_admin_1_states_provinces.geojson", "admin0": BASE + "ne_10m_admin_0_countries.geojson",
+        "mys2": "https://media.githubusercontent.com/media/wmgeolab/geoBoundaries/main/releaseData/gbOpen/MYS/ADM2/geoBoundaries-MYS-ADM2_simplified.geojson"}
 OUT = Path(__file__).resolve().parent.parent / "regions.geojson"
 TOL = 0.01                      # simplification tolerance, degrees
 MIN_AREA = 0.001                # smallest ring kept, square degrees (about 12 km2 at the equator)
@@ -27,6 +30,8 @@ REGIONS = {
     "ckal": ("admin1", "Indonesia", "Kalimantan Tengah", "Central Kalimantan", "Provinces"),
     "skal": ("admin1", "Indonesia", "Kalimantan Selatan", "South Kalimantan", "Provinces"),
     "khm": ("admin0", None, "Cambodia", "Cambodia", "Countries"),
+    "ktinggi": ("mys2", None, "Kota Tinggi", "Kota Tinggi (Johor)", "Districts"),
+    "mersing": ("mys2", None, "Mersing", "Mersing (Johor)", "Districts"),
 }
 
 
@@ -84,14 +89,20 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--admin1")
     ap.add_argument("--admin0")
+    ap.add_argument("--mys2")
     args = ap.parse_args()
-    paths = {"admin1": args.admin1, "admin0": args.admin0}
+    paths = {"admin1": args.admin1, "admin0": args.admin0, "mys2": args.mys2}
     index = {}
     for level in {r[0] for r in REGIONS.values()}:
         data = load(paths[level], level)
         for f in data["features"]:
             p = f["properties"]
-            index[(level, p.get("admin") if level == "admin1" else None, p["name"] if level == "admin1" else p["NAME"])] = f
+            if level == "admin1":
+                index[(level, p.get("admin"), p["name"])] = f
+            elif level == "admin0":
+                index[(level, None, p["NAME"])] = f
+            else:
+                index[(level, None, p["shapeName"])] = f
     feats = []
     for id_, (level, country, name, label, group) in REGIONS.items():
         f = index.get((level, country, name))
