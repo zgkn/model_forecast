@@ -104,11 +104,35 @@ body { font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
 #wv-status { top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 8px 16px; pointer-events: none; }
 .wv-panel[hidden] { display: none; }
 
+#wv-opts { display: none; }
 @media (max-width: 760px) {
-  #wv-legend { width: 250px; }
+  #wv-legend { width: 250px; padding: 6px 10px 4px; }
   #wv-bottom { bottom: 24px; }
   #wv-credit, #wv-readout { display: none; }
-  #wv-eps { padding-top: 150px; }
+  #wv-eps { padding-top: 130px; }
+  /* compact top panel: tabs, then time + Options toggle; the controls fold away */
+  #wv-top { left: 52px; top: 8px; gap: 6px; padding: 6px 8px; max-width: calc(100% - 52px - 52px); }
+  #wv-top > .wv-row:first-child {
+    display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center;
+  }
+  #wv-tabs { grid-column: 1 / -1; gap: 3px; }
+  #wv-tabs button { flex: 1 1 auto; padding: 4px 6px; font-size: 12px; white-space: nowrap; }
+  #wv-tabs .wv-long { display: none; }
+  #wv-valid { font-size: 12px; }
+  #wv-run { font-size: 10.5px; line-height: 1.25; }
+  #wv-opts {
+    display: block; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; align-self: start;
+    padding: 3px 8px; border-radius: 6px; border: 1px solid var(--wv-line); background: transparent; color: var(--wv-ink);
+  }
+  #wv-opts::after { content: " \25BE"; }
+  #wv-top.wv-collapsed #wv-opts::after { content: " \25B8"; }
+  #wv-top.wv-collapsed #wv-opts-body { display: none; }
+  #wv-opts:focus-visible { outline: 2px solid var(--wv-accent); outline-offset: 2px; }
+  #wv-opts-body { display: flex; flex-direction: column; gap: 6px; }
+  .wv-controls { gap: 6px 10px; }
+  .wv-controls label { font-size: 11px; }
+  .wv-controls select { padding: 3px 4px; font-size: 12px; max-width: 200px; }
+  #wv-style button { padding: 3px 7px; font-size: 12px; }
 }
 
 #wv-eps {
@@ -123,7 +147,7 @@ body { font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .wv-eps-credit { font-size: 11px !important; }
 body.wv-eps-view #wv-eps { display: block !important; }
 body.wv-eps-view #wv-bottom, body.wv-eps-view #wv-legend, body.wv-eps-view #wv-readout,
-body.wv-eps-view #wv-status, body.wv-eps-view #wv-credit, body.wv-eps-view .wv-controls,
+body.wv-eps-view #wv-status, body.wv-eps-view #wv-credit, body.wv-eps-view .wv-controls, body.wv-eps-view #wv-opts,
 body.wv-eps-view .leaflet-control-container { display: none !important; }
 
 [hidden] { display: none !important; }

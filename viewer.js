@@ -749,9 +749,18 @@ window.addEventListener("load", function () {
   });
   var eb = document.createElement("button");   // separate tab: the ECMWF ensemble meteogram image
   eb.type = "button"; eb.setAttribute("role", "tab"); eb.dataset.key = "eps";
-  eb.textContent = "EPS \u00b7 " + EPS.place;
+  eb.innerHTML = "EPS<span class=\"wv-long\"> \u00b7 " + EPS.place + "</span>";
   eb.addEventListener("click", showEps);
   el("wv-tabs").appendChild(eb);
+
+  var optsBtn = el("wv-opts"), phone = window.matchMedia("(max-width: 760px)");
+  function setOpts(open) {                  // on phones the controls fold away to leave the map visible
+    el("wv-top").classList.toggle("wv-collapsed", !open);
+    optsBtn.setAttribute("aria-expanded", String(open));
+  }
+  optsBtn.addEventListener("click", function () { setOpts(optsBtn.getAttribute("aria-expanded") !== "true"); });
+  setOpts(!phone.matches);
+  phone.addEventListener("change", function (e) { setOpts(!e.matches); });
 
   var shadeSel = el("wv-shade"), levelSel = el("wv-level");
   M.levels.forEach(function (l) { levelSel.add(new Option(l + " hPa", String(l))); });
