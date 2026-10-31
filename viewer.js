@@ -854,11 +854,12 @@ window.addEventListener("load", function () {
     if (sgSig !== state.model + "/" + state.level + "/" + sgPlace + "/" + sgStat) sgRender(); else sgNow();
   }
   var sgLayers = {};                        // place id -> Leaflet layer of its box or outline
-  var SG_STYLE = { color: "#1a1a19", weight: 2, dashArray: "4 3", fillColor: "#ffffff", fillOpacity: 0.12 };
-  function sgStyle() {                      // the place shown in the panel is drawn solid and heavier
+  var SG_STYLE = { color: "#1a1a19", weight: 1.6, fillColor: "#ffffff", fillOpacity: 0.08 };
+  var SG_HALO = { color: "#ffffff", weight: 4.5, opacity: 0.85, fill: false, interactive: false };   // white casing so the line reads on any shading
+  function sgStyle() {                      // the place shown in the panel is drawn heavier and with more fill
     SGP.forEach(function (p) {
       var on = sgOpen && p.id === sgPlace, layer = sgLayers[p.id];
-      if (layer) layer.setStyle(on ? { weight: 2.5, dashArray: null, fillOpacity: 0.25 } : { weight: SG_STYLE.weight, dashArray: SG_STYLE.dashArray, fillOpacity: SG_STYLE.fillOpacity });
+      if (layer) layer.setStyle(on ? { weight: 3, fillOpacity: 0.25 } : { weight: SG_STYLE.weight, fillOpacity: SG_STYLE.fillOpacity });
     });
   }
   function sgShow(open, id) {
@@ -868,13 +869,22 @@ window.addEventListener("load", function () {
     sgStyle();
   }
   if (SGP.length) {
-    map.createPane("wv-sg"); map.getPane("wv-sg").style.zIndex = 440;
+    // outlines sit above the wind arrows so the areas that have a time series can always be seen; clicks still reach them
+    map.createPane("wv-sg-halo"); map.getPane("wv-sg-halo").style.zIndex = 455;
+    map.createPane("wv-sg"); map.getPane("wv-sg").style.zIndex = 460;
     var psel = el("wv-sg-place"), og = {};
+    function marker(p) {                    // a small ring for areas that are only a few pixels wide when zoomed out (not clickable)
+      var c = L.latLngBounds(p.box).getCenter();
+      L.circleMarker(c, Object.assign({}, SG_HALO, { pane: "wv-sg-halo", radius: 7 })).addTo(map);
+      L.circleMarker(c, { pane: "wv-sg", radius: 7, color: "#1a1a19", weight: 1.6, fill: false, interactive: false }).addTo(map);
+    }
     SGP.forEach(function (p) {
       var g = p.group || "Boxes";
       if (!og[g]) { og[g] = document.createElement("optgroup"); og[g].label = g; psel.appendChild(og[g]); }
       og[g].appendChild(new Option(p.name, p.id));
+      if (p.cells < 10) marker(p);
       if (p.kind !== "box") return;
+      L.rectangle(p.box, Object.assign({ pane: "wv-sg-halo" }, SG_HALO)).addTo(map);
       var rect = L.rectangle(p.box, Object.assign({ pane: "wv-sg" }, SG_STYLE));
       var hit = L.circleMarker(L.latLngBounds(p.box).getCenter(),     // a click target that stays usable when zoomed out
         { pane: "wv-sg", radius: 9, stroke: false, fillColor: "#ffffff", fillOpacity: 0.01 });   // small, so it never covers the districts next to it
@@ -883,7 +893,8 @@ window.addEventListener("load", function () {
     });
     if (SGP.some(function (p) { return p.kind === "region"; })) {
       fetch("data/regions.json").then(function (r) { return r.json(); }).then(function (gj) {
-        L.geoJSON(gj, { pane: "wv-sg", style: Object.assign({}, SG_STYLE, { weight: 1.5, dashArray: "5 4", fillOpacity: 0.06 }),
+        L.geoJSON(gj, { pane: "wv-sg-halo", style: SG_HALO, interactive: false }).addTo(map);
+        L.geoJSON(gj, { pane: "wv-sg", style: SG_STYLE,
           onEachFeature: function (f, layer) {
             sgLayers[f.properties.id] = layer;
             layer.on("click", function () { sgShow(true, f.properties.id); });

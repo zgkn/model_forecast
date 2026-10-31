@@ -93,6 +93,9 @@ current tab; click or drag on the charts to move the time slider. The places:
   (CC BY 4.0, https://www.geoboundaries.org; credited in the page footer). `python tools/make_regions.py` rebuilds it; add a province or country by adding a line to
   `REGIONS` there; the page picks it up with no other change.
   Natural Earth draws boundaries as it sees them, including in disputed areas.
+* **On the map:** every area with a time series is always outlined (solid dark line with a white halo, drawn above the wind
+  arrows), clickable or not; areas only a few cells wide (Singapore, the Johor districts) also get a small ring so they
+  can be found when zoomed out. The one shown in the panel is drawn heavier.
 * **Weights:** every 0.25 degree grid cell gets the fraction of it that lies inside the outline (measured on a 0.025
   degree sub-grid), so small areas are not lost between the nodes. A box is 1 on the nodes inside it (edges included).
 * **Mean tab:** the weighted mean of the cells. Wind speed is the mean of the cells' speeds, wind direction is the

@@ -96,7 +96,7 @@ body { font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
 }
 #wv-legend-ticks span { position: absolute; transform: translateX(-50%); }
 #wv-credit {
-  position: absolute; z-index: 1000; right: 8px; bottom: 4px;
+  position: absolute; z-index: 1000; left: 8px; bottom: 4px;
   font-size: 10px; color: #444; background: rgba(255, 255, 255, 0.7); padding: 0 4px;
 }
 #wv-readout {
@@ -184,6 +184,7 @@ body.wv-eps-view .leaflet-control-container { display: none !important; }
 }
 #wv-sg-vars button[aria-pressed="true"] { background: var(--wv-accent); border-color: var(--wv-accent); color: var(--wv-accent-ink); }
 #wv-sg-vars button:focus-visible { outline: 2px solid var(--wv-accent); outline-offset: 2px; }
+.wv-sg-credit { margin-top: 4px; font-size: 10px; color: var(--wv-ink-2); }
 #wv-sg-chart { max-height: calc(100vh - 250px); overflow-y: auto; }
 #wv-sg-read { min-height: 2.7em; margin: 2px 0 4px; font-size: 11.5px; line-height: 1.3; color: var(--wv-ink-2); font-variant-numeric: tabular-nums; }
 #wv-sg-chart svg { display: block; width: 100%; touch-action: pan-y; cursor: crosshair; }
