@@ -642,7 +642,9 @@ window.addEventListener("load", function () {
 
   // ---- Singapore box: click it for the box-average time series of the current tab -----------------------------------
   var SGP = M.places || [], sgPlace = SGP.length ? SGP[0].id : null, sgOpen = false, sgSig = "", sgGeo = null, sgHovering = false;
-  function sgOf(d) { return d && d.sg ? d.sg[sgPlace] : null; }          // series of the selected place in a model
+  var sgStat = "mean";                      // "mean" (area mean) or "max" (largest cell), shown as two tabs
+  try { if (localStorage.getItem("wv-sg-stat") === "max") sgStat = "max"; } catch (e) { /* storage blocked */ }
+  function sgOf(d) { var o = d && d.sg ? d.sg[sgPlace] : null; return o ? o[sgStat] : null; }   // series of the selected place and statistic
   function sgPlaceObj() { return SGP.filter(function (p) { return p.id === sgPlace; })[0]; }
   var SVGNS = "http://www.w3.org/2000/svg";
   function pad3(n) { return String(n % 360).padStart(3, "0"); }
@@ -657,8 +659,11 @@ window.addEventListener("load", function () {
   var sgSel = {};
   try { sgSel = JSON.parse(localStorage.getItem("wv-sg-vars") || "{}") || {}; } catch (e) { sgSel = {}; }
   function sgGroup() { return M.models[state.model].shading ? "cams" : "nwp"; }
+  function sgVars(g) {                      // a maximum of wind directions means nothing, so direction is a mean-only variable
+    return SG_VARS[g].filter(function (v) { return !(sgStat === "max" && v[0] === "dir"); });
+  }
   function sgChosen() {                     // chosen variable ids of this tab, only ones that exist
-    var g = sgGroup(), ids = SG_VARS[g].map(function (v) { return v[0]; });
+    var g = sgGroup(), ids = sgVars(g).map(function (v) { return v[0]; });
     var c = (Array.isArray(sgSel[g]) ? sgSel[g] : SG_DEFAULT[g]).filter(function (id) { return ids.indexOf(id) >= 0; });
     return c.length ? c : SG_DEFAULT[g].slice();
   }
@@ -672,7 +677,7 @@ window.addEventListener("load", function () {
   function sgChips() {
     var box = el("wv-sg-vars"), chosen = sgChosen();
     box.innerHTML = "";
-    SG_VARS[sgGroup()].forEach(function (v) {
+    sgVars(sgGroup()).forEach(function (v) {
       var b = document.createElement("button");
       b.type = "button"; b.textContent = v[1];
       b.setAttribute("aria-pressed", String(chosen.indexOf(v[0]) >= 0));
@@ -684,19 +689,19 @@ window.addEventListener("load", function () {
   function sgSpec() {                       // the charts of the current tab, for the chosen variables
     var d = M.models[state.model], s = sgOf(d), c = sgChosen(), has = function (id) { return c.indexOf(id) >= 0; };
     if (!s) return null;
-    var specs = [];
+    var specs = [], tag = sgStat === "max" ? " · max of cells" : "";
     if (d.shading) {                        // CAMS: its AOD, and the wind of the model it borrows
       var f = d.flowFrom && M.models[d.flowFrom], lv = state.level;
-      if (has("aod")) specs.push({ title: "Organic matter AOD at 550 nm", kind: "line", floor: 1, series: [{ cls: "sg-aod", t: d.valid, v: s.aod }] });
+      if (has("aod")) specs.push({ title: "Organic matter AOD at 550 nm" + tag, kind: "line", floor: 1, series: [{ cls: "sg-aod", t: d.valid, v: s.aod }] });
       var fs = sgOf(f);
-      if (fs && has("ws")) specs.push({ title: f.label + " wind speed at " + lv + " hPa (kt)", kind: "line", floor: 10,
+      if (fs && has("ws")) specs.push({ title: f.label + " wind speed at " + lv + " hPa (kt)" + tag, kind: "line", floor: 10,
                                                series: [{ cls: "sg-l1", t: f.valid, v: fs.speed[lv] }] });
       if (fs && has("dir")) specs.push({ title: f.label + " wind direction at " + lv + " hPa (from, °)", kind: "dots", fixed: 360, ticks: [0, 90, 180, 270, 360],
                                                 series: [{ sw: "sw1", t: f.valid, v: fs.dir[lv] }] });
       return specs;
     }
     var lvls = M.levels.filter(function (l) { return has("w" + l); });
-    if (lvls.length) specs.push({ title: "Wind speed (kt)", kind: "line", floor: 10,
+    if (lvls.length) specs.push({ title: "Wind speed (kt)" + tag, kind: "line", floor: 10,
       series: lvls.map(function (l) { var i = M.levels.indexOf(l); return { cls: "sg-l" + (i + 1), sw: "sw" + (i + 1), label: l + " hPa", t: d.valid, v: s.speed[l] }; }) });
     if (has("dir")) {
       var dl = lvls.length ? lvls : [M.levels[0]];
@@ -704,13 +709,9 @@ window.addEventListener("load", function () {
         series: dl.map(function (l) { var i = M.levels.indexOf(l); return { sw: "sw" + (i + 1), label: l + " hPa", t: d.valid, v: s.dir[l] }; }) });
     }
     var iv = d.interval[1] || 3;
-    if (has("rain")) specs.push({ title: "Rain in the preceding " + iv + " h (mm)", kind: "bar", floor: 1, series: [{ t: d.valid, v: s.rain, iv: d.interval }] });
-    if (has("cum")) {
-      var acc = 0;
-      specs.push({ title: "Rain total since +0 h (mm)", kind: "line", floor: 5,
-        series: [{ cls: "sg-bar-line", t: d.valid, v: s.rain.map(function (r) { acc += r; return +acc.toFixed(2); }) }] });
-    }
-    if (has("rh")) specs.push({ title: "Relative humidity at " + M.rhLevel + " hPa (%)", kind: "line", fixed: 100, series: [{ cls: "sg-rh", t: d.valid, v: s.rh }] });
+    if (has("rain")) specs.push({ title: "Rain in the preceding " + iv + " h (mm)" + tag, kind: "bar", floor: 1, series: [{ t: d.valid, v: s.rain, iv: d.interval }] });
+    if (has("cum")) specs.push({ title: "Rain total since +0 h (mm)" + tag, kind: "line", floor: 5, series: [{ cls: "sg-bar-line", t: d.valid, v: s.cum }] });
+    if (has("rh")) specs.push({ title: "Relative humidity at " + M.rhLevel + " hPa (%)" + tag, kind: "line", fixed: 100, series: [{ cls: "sg-rh", t: d.valid, v: s.rh }] });
     return specs;
   }
   function niceMax(v, floor) {
@@ -725,11 +726,13 @@ window.addEventListener("load", function () {
   }
 
   function sgRender() {
-    sgSig = state.model + "/" + state.level + "/" + sgPlace;
+    sgSig = state.model + "/" + state.level + "/" + sgPlace + "/" + sgStat;
     var d = M.models[state.model], specs = sgSpec(), box = el("wv-sg-chart");
     var pl = sgPlaceObj(), bx = pl.box;
     el("wv-sg-place").value = sgPlace;
-    el("wv-sg-sub").textContent = d.label + " · " + +(bx[1][1] - bx[0][1]).toFixed(2) + "° × " + +(bx[1][0] - bx[0][0]).toFixed(2) + "° box average · times in UTC";
+    var what = pl.kind === "box" ? +(bx[1][1] - bx[0][1]).toFixed(2) + "° × " + +(bx[1][0] - bx[0][0]).toFixed(2) + "° box" : "about " + Math.round(pl.cells) + " grid cells";
+    el("wv-sg-sub").textContent = d.label + " · " + what + " · " + (sgStat === "max" ? "maximum of the cells at least half inside" : "area mean") + " · times in UTC";
+    document.querySelectorAll("#wv-sg-stat button").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.stat === sgStat)); });
     sgChips();
     box.innerHTML = ""; sgGeo = null;
     if (!specs || !specs.length) return;
@@ -819,12 +822,13 @@ window.addEventListener("load", function () {
     if (d.shading) {
       p.push("AOD " + s.aod[i].toFixed(2));
       var f = d.flowFrom && M.models[d.flowFrom], fs = sgOf(f), j = fs ? f.valid.indexOf(d.valid[i]) : -1;
-      if (j >= 0) p.push(f.label + " " + state.level + " hPa wind " + Math.round(fs.speed[state.level][j]) + " kt from " + pad3(fs.dir[state.level][j]) + "°");
+      if (j >= 0) p.push(f.label + " " + state.level + " hPa wind " + Math.round(fs.speed[state.level][j]) + " kt" + (fs.dir ? " from " + pad3(fs.dir[state.level][j]) + "°" : ""));
     } else {
-      M.levels.forEach(function (l) { p.push(l + " hPa " + Math.round(s.speed[l][i]) + " kt from " + pad3(s.dir[l][i]) + "°"); });
+      M.levels.forEach(function (l) { p.push(l + " hPa " + Math.round(s.speed[l][i]) + " kt" + (s.dir ? " from " + pad3(s.dir[l][i]) + "°" : "")); });
       if (d.interval[i]) p.push("rain " + s.rain[i].toFixed(1) + " mm in " + d.interval[i] + " h");
       p.push("RH " + s.rh[i] + "%");
     }
+    if (sgStat === "max") p.push("(max of cells)");
     return p.join(" · ");
   }
   function sgHover(i) {                     // i: index under the pointer, or null to show the current frame
@@ -847,13 +851,14 @@ window.addEventListener("load", function () {
   }
   function sgUpdate() {
     if (!sgOpen) return;
-    if (sgSig !== state.model + "/" + state.level + "/" + sgPlace) sgRender(); else sgNow();
+    if (sgSig !== state.model + "/" + state.level + "/" + sgPlace + "/" + sgStat) sgRender(); else sgNow();
   }
-  var sgLayers = {};                        // place id -> {rect, hit}
-  function sgStyle() {                      // the box of the place shown in the panel is drawn solid and heavier
+  var sgLayers = {};                        // place id -> Leaflet layer of its box or outline
+  var SG_STYLE = { color: "#1a1a19", weight: 2, dashArray: "4 3", fillColor: "#ffffff", fillOpacity: 0.12 };
+  function sgStyle() {                      // the place shown in the panel is drawn solid and heavier
     SGP.forEach(function (p) {
-      var on = sgOpen && p.id === sgPlace;
-      sgLayers[p.id].rect.setStyle(on ? { weight: 3, dashArray: null, fillOpacity: 0.3 } : { weight: 2, dashArray: "4 3", fillOpacity: 0.15 });
+      var on = sgOpen && p.id === sgPlace, layer = sgLayers[p.id];
+      if (layer) layer.setStyle(on ? { weight: 2.5, dashArray: null, fillOpacity: 0.25 } : { weight: SG_STYLE.weight, dashArray: SG_STYLE.dashArray, fillOpacity: SG_STYLE.fillOpacity });
     });
   }
   function sgShow(open, id) {
@@ -864,17 +869,37 @@ window.addEventListener("load", function () {
   }
   if (SGP.length) {
     map.createPane("wv-sg"); map.getPane("wv-sg").style.zIndex = 440;
-    var psel = el("wv-sg-place");
+    var psel = el("wv-sg-place"), groups = { region: "Provinces", box: "Boxes" }, og = {};
     SGP.forEach(function (p) {
-      psel.add(new Option(p.name, p.id));
-      var rect = L.rectangle(p.box, { pane: "wv-sg", color: "#1a1a19", weight: 2, dashArray: "4 3", fillColor: "#ffffff", fillOpacity: 0.15 });
+      if (!og[p.kind]) { og[p.kind] = document.createElement("optgroup"); og[p.kind].label = groups[p.kind] || p.kind; psel.appendChild(og[p.kind]); }
+      og[p.kind].appendChild(new Option(p.name, p.id));
+      if (p.kind !== "box") return;
+      var rect = L.rectangle(p.box, Object.assign({ pane: "wv-sg" }, SG_STYLE));
       var hit = L.circleMarker(L.latLngBounds(p.box).getCenter(),     // a click target that stays usable when zoomed out
         { pane: "wv-sg", radius: 16, stroke: false, fillColor: "#ffffff", fillOpacity: 0.01 });
       [rect, hit].forEach(function (l) { l.addTo(map); l.on("click", function () { sgShow(true, p.id); }); });
-      sgLayers[p.id] = { rect: rect, hit: hit };
+      sgLayers[p.id] = rect;
     });
+    if (SGP.some(function (p) { return p.kind === "region"; })) {
+      fetch("data/regions.json").then(function (r) { return r.json(); }).then(function (gj) {
+        L.geoJSON(gj, { pane: "wv-sg", style: Object.assign({}, SG_STYLE, { weight: 1.5, dashArray: "5 4", fillOpacity: 0.06 }),
+          onEachFeature: function (f, layer) {
+            sgLayers[f.properties.id] = layer;
+            layer.on("click", function () { sgShow(true, f.properties.id); });
+          } }).addTo(map);
+        sgStyle();
+      }).catch(function () { /* outlines are optional: the place menu still works */ });
+    }
     psel.addEventListener("change", function () { sgShow(true, psel.value); });
     el("wv-sg-close").addEventListener("click", function () { sgShow(false); });
+    document.querySelectorAll("#wv-sg-stat button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (sgStat === b.dataset.stat) return;
+        sgStat = b.dataset.stat;
+        try { localStorage.setItem("wv-sg-stat", sgStat); } catch (e) { /* storage blocked */ }
+        sgRender();
+      });
+    });
     window.addEventListener("resize", function () { if (sgOpen) { sgSig = ""; sgUpdate(); } });
   }
 

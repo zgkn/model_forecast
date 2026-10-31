@@ -75,30 +75,36 @@ A **CAMS** tab shows the CAMS global forecast of organic matter aerosol optical 
   wind file of one level (~3.5 MB) is loaded only when the CAMS tab is shown.
 * Data: Generated using Copernicus Atmosphere Monitoring Service information.
 
-## Time series boxes
+## Area time series (provinces and a box)
 
-Dashed boxes on the map open a panel with the box-average time series of the current tab. Click a box (or pick the place
-in the panel's menu); click or drag on the charts to move the time slider. The places (`PLACES` in `timeseries.py`):
+Click a province outline or the Singapore box (or pick the place in the panel's menu) to get the time series of the
+current tab; click or drag on the charts to move the time slider. The places:
 
-| Place | Box |
+| Place | Area |
 |---|---|
-| Singapore | 0.5 x 0.5 degrees (the 2 x 2 grid cells around the island), 1.125-1.625 N, 103.625-104.125 E |
-| Sumatra box | 95-106 E, 5 S-0 (11 x 5 degrees) |
-| Kalimantan box | 109-115 E, 4 S-0 (6 x 4 degrees) |
+| Riau, Jambi, South Sumatra | provinces, Natural Earth admin-1 outlines |
+| West, Central, South Kalimantan | provinces, same source |
+| Singapore | box, 0.5 x 0.5 degrees (the 2 x 2 grid cells around the island) |
 
-* A place is a rectangle given by its edges (`PLACES` in `timeseries.py`). Its average is the plain mean of the 0.25 degree
-  grid nodes inside it, nodes on the edges included, sea and land alike (the Sumatra box contains a lot of ocean).
-  A test checks that every place lies inside the map and contains grid nodes.
-* IFS / AIFS: wind speed at 925 / 850 / 700 hPa (mean of the cells' speeds; the readout also gives the direction of
-  the mean wind), rain per model interval (3 h IFS, 6 h AIFS) as bars, RH at 700 hPa.
-* CAMS: organic matter AOD, and the IFS wind speed at the level chosen in the Flow menu.
-* Chips above the charts choose what is drawn (any combination; at least one stays on). IFS / AIFS: wind speed at each
-  level, wind direction, rain, rain total since +0 h, RH. CAMS: AOD, IFS wind speed, IFS wind direction. The choice is
-  remembered in the browser, separately for IFS/AIFS and for CAMS.
-* The numbers are computed at build time (`timeseries.py`) and embedded in the page (about 3 KB per place), so the panel
-  opens instantly and needs no extra download. Measured: up to ~200 boxes made no difference to panning; ~1000 did.
-* To change or add a place, edit `PLACES` (the edges just have to lie inside the map). On phones the panel is a sheet
-  above the time slider.
+* **Outlines:** `regions.geojson` (20 KB) holds the province outlines, rounded and simplified to 0.01 degrees from Natural
+  Earth 10m admin-1 (public domain). `python tools/make_regions.py` rebuilds it; add a province by adding a line to
+  `REGIONS` there; the page picks it up with no other change.
+  Natural Earth draws boundaries as it sees them, including in disputed areas.
+* **Weights:** every 0.25 degree grid cell gets the fraction of it that lies inside the outline (measured on a 0.025
+  degree sub-grid), so small areas are not lost between the nodes. A box is 1 on the nodes inside it (edges included).
+* **Mean tab:** the weighted mean of the cells. Wind speed is the mean of the cells' speeds, wind direction is the
+  direction of the mean wind vector, rain is the mean of the cells' rain, rain total the mean of their totals.
+* **Max tab:** the largest value among the cells that are at least half inside the area (the best covered cell for a
+  tiny area). Rain total is the largest per-cell total, not the sum of per-step maxima. There is no maximum of wind
+  directions, so that variable is hidden on this tab.
+* **Remember:** the cells are 0.25 degree model grid cells (about 28 km), so a province maximum is a model-grid maximum,
+  smoother than a station would see, and larger provinces have more cells to produce a high maximum.
+* IFS / AIFS: wind speed at 925 / 850 / 700 hPa, wind direction, rain per model interval (3 h IFS, 6 h AIFS) as bars,
+  rain total since +0 h, RH at 700 hPa. CAMS: organic matter AOD, and the IFS wind speed and direction at the level
+  chosen in the Flow menu. Chips above the charts choose what is drawn (at least one stays on); the choice and the tab
+  are remembered in the browser.
+* The numbers are computed at build time (`timeseries.py`) and embedded in the page (about 5 KB per place and model), so
+  the panel opens instantly and needs no extra download. On phones the panel is a sheet above the time slider.
 
 ## How it stays fast
 
@@ -159,5 +165,6 @@ from the default branch.
 
 * `wind_forecast.py` - download, cache and site build
 * `viewer.html`, `viewer.css`, `viewer.js` - the UI that is inlined into the Folium page
-* `cdd.py`, `cams.py`, `timeseries.py`, `tests/` - consecutive-dry-days engine, CAMS download, Singapore box series and their tests (`python -m pytest`)
+* `cdd.py`, `cams.py`, `timeseries.py`, `tests/` - consecutive-dry-days engine, CAMS download, area time series and their tests
+* `regions.geojson`, `tools/make_regions.py` - province outlines for the area time series (`python -m pytest`)
 * `coastlines.geojson`, `land.geojson`, `tools/make_coastlines.mjs` - coastline/border/land data and its generator
