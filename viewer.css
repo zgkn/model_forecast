@@ -155,7 +155,6 @@ body.wv-eps-view .leaflet-control-container { display: none !important; }
 [hidden] { display: none !important; }
 
 /* Singapore time series */
-.wv-sg-label { font-weight: 600; font-size: 11px; padding: 1px 5px; }
 #wv-sg { top: 70px; right: 12px; width: 400px; box-sizing: border-box; padding: 8px 10px 6px; z-index: 1002; background: var(--wv-solid); }
 .wv-sg-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .wv-sg-head > div { min-width: 0; flex: 1; }

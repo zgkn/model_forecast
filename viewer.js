@@ -850,7 +850,6 @@ window.addEventListener("load", function () {
     if (sgSig !== state.model + "/" + state.level + "/" + sgPlace) sgRender(); else sgNow();
   }
   var sgLayers = {};                        // place id -> {rect, hit}
-  var SG_LABEL_SIDE = { ssum: "left", ckal: "right" };
   function sgStyle() {                      // the box of the place shown in the panel is drawn solid and heavier
     SGP.forEach(function (p) {
       var on = sgOpen && p.id === sgPlace;
@@ -872,9 +871,6 @@ window.addEventListener("load", function () {
       var hit = L.circleMarker(L.latLngBounds(p.box).getCenter(),     // a click target that stays usable when zoomed out
         { pane: "wv-sg", radius: 16, stroke: false, fillColor: "#ffffff", fillOpacity: 0.01 });
       [rect, hit].forEach(function (l) { l.addTo(map); l.on("click", function () { sgShow(true, p.id); }); });
-      var side = SG_LABEL_SIDE[p.id] || "top";        // labels placed so neighbouring boxes do not cover each other
-      hit.bindTooltip(p.name.split(" (")[0], { permanent: true, direction: side, className: "wv-sg-label",
-        offset: side === "top" ? [0, -12] : side === "left" ? [-12, 0] : side === "right" ? [12, 0] : [0, 12] });
       sgLayers[p.id] = { rect: rect, hit: hit };
     });
     psel.addEventListener("change", function () { sgShow(true, psel.value); });
