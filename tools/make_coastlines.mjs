@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { feature } from "topojson-client";
 
-const [W, S, E, N] = [88, -12, 150, 30], PAD = 2;
+const [W, S, E, N] = [88, -12, 156, 56], PAD = 2;
 const topo = JSON.parse(readFileSync("node_modules/world-atlas/countries-10m.json"));
 const r = (v) => Math.round(v * 100) / 100;
 const touches = (ring) => ring.some(([x, y]) => x > W - PAD && x < E + PAD && y > S - PAD && y < N + PAD);

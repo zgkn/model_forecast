@@ -9,6 +9,7 @@ listed in REGIONS are kept; their outlines are rounded to 0.01 degrees, simplifi
 islands smaller than about 10 km2 are dropped, which leaves a few tens of KB.
 """
 import argparse
+import math
 import json
 import sys
 import urllib.request
@@ -20,6 +21,11 @@ URLS = {"admin1": BASE + "ne_10m_admin_1_states_provinces.geojson", "admin0": BA
 OUT = Path(__file__).resolve().parent.parent / "regions.geojson"
 TOL = 0.01                      # simplification tolerance, degrees
 MIN_AREA = 0.001                # smallest ring kept, square degrees (about 12 km2 at the equator)
+
+# several admin-1 areas merged into one: id: (country, ISO 3166-2 codes, display name, menu group); Kyushu is the 7 prefectures of the island
+MERGED = {
+    "kyushu": ("Japan", ["JP-40", "JP-41", "JP-42", "JP-43", "JP-44", "JP-45", "JP-46"], "Kyushu (Japan)", "Japan"),
+}
 
 # id: (level, Natural Earth country (admin-1) / None, Natural Earth name, display name, menu group)
 REGIONS = {
@@ -85,6 +91,27 @@ def load(path, level):
     return json.loads(Path(path).read_text()) if path else json.load(urllib.request.urlopen(URLS[level], timeout=300))
 
 
+def dissolve(geoms, min_lat=29.5, res=0.005):
+    """One MultiPolygon from several touching ones, with the borders between them removed (rasterise, then vectorise).
+
+    Rings whose mean latitude is below min_lat are left out (the far southern islands of Kagoshima).
+    """
+    from rasterio.features import rasterize, shapes
+    from rasterio.transform import from_origin
+    polys = []
+    for g in geoms:
+        polys += [g["coordinates"]] if g["type"] == "Polygon" else g["coordinates"]
+    polys = [p for p in polys if sum(pt[1] for pt in p[0]) / len(p[0]) >= min_lat]
+    xs = [pt[0] for p in polys for pt in p[0]]
+    ys = [pt[1] for p in polys for pt in p[0]]
+    west, north = min(xs) - 0.02, max(ys) + 0.02
+    shape = (math.ceil((north - (min(ys) - 0.02)) / res), math.ceil((max(xs) + 0.02 - west) / res))
+    transform = from_origin(west, north, res, res)
+    mask = rasterize([{"type": "Polygon", "coordinates": p} for p in polys], out_shape=shape, transform=transform, fill=0, dtype="uint8")
+    parts = [g["coordinates"] for g, v in shapes(mask, mask=mask == 1, transform=transform, connectivity=8)]
+    return {"type": "MultiPolygon", "coordinates": parts}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--admin1")
@@ -99,6 +126,7 @@ def main():
             p = f["properties"]
             if level == "admin1":
                 index[(level, p.get("admin"), p["name"])] = f
+                index[("iso", p.get("admin"), p.get("iso_3166_2"))] = f
             elif level == "admin0":
                 index[(level, None, p["NAME"])] = f
             else:
@@ -110,6 +138,16 @@ def main():
             sys.exit(f"{level} {country or ''} / {name} not found in the Natural Earth file")
         g = simplify(f["geometry"])
         feats.append({"type": "Feature", "properties": {"id": id_, "name": label, "group": group, "ne_name": name}, "geometry": g})
+        print(id_, label, len(g["coordinates"]), "polygons,", sum(len(r) for p in g["coordinates"] for r in p), "points")
+    for id_, (country, isos, label, group) in MERGED.items():
+        parts = []
+        for iso in isos:
+            f = index.get(("iso", country, iso))
+            if f is None:
+                sys.exit(f"{country} {iso} not found in the Natural Earth admin-1 file")
+            parts.append(f["geometry"])
+        g = simplify(dissolve(parts))
+        feats.append({"type": "Feature", "properties": {"id": id_, "name": label, "group": group, "ne_name": "+".join(isos)}, "geometry": g})
         print(id_, label, len(g["coordinates"]), "polygons,", sum(len(r) for p in g["coordinates"] for r in p), "points")
     OUT.write_text(json.dumps({"type": "FeatureCollection", "features": feats}, separators=(",", ":")))
     print("wrote", OUT, OUT.stat().st_size // 1024, "KB")

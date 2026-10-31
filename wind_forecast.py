@@ -45,7 +45,7 @@ HERE = Path(__file__).resolve().parent
 LEVELS = [925, 850, 700]  # wind levels (hPa); humidity is taken at RH_LEVEL
 RH_LEVEL = 700
 # Region: 88-150E, 12S-30N
-LAT_N, LAT_S, LON_W, LON_E = 30.0, -12.0, 88.0, 150.0
+LAT_N, LAT_S, LON_W, LON_E = 56.0, -12.0, 88.0, 156.0     # southeast Asia plus Japan with a 10 degree buffer
 STEP = 0.25  # source grid spacing in degrees
 NY = round((LAT_N - LAT_S) / STEP) + 1
 NX = round((LON_E - LON_W) / STEP) + 1
@@ -437,7 +437,7 @@ def write_cams(path, data_dir):
 
 def build_site(manifest, out_path):
     m = folium.Map(
-        location=[(LAT_N + LAT_S) / 2, (LON_W + LON_E) / 2], zoom_start=5, min_zoom=4, max_zoom=10,
+        location=[(LAT_N + LAT_S) / 2, (LON_W + LON_E) / 2], zoom_start=5, min_zoom=3, max_zoom=10,
         tiles=None, zoom_control=True, zoom_snap=0.25,
         min_lat=LAT_S - 10, max_lat=LAT_N + 10, min_lon=LON_W - 10, max_lon=LON_E + 10, max_bounds=True,
     )
@@ -449,7 +449,7 @@ def build_site(manifest, out_path):
     folium.TileLayer("OpenStreetMap", name="OpenStreetMap", no_wrap=True, show=False).add_to(m)
     folium.LayerControl(position="topright", collapsed=True).add_to(m)
     m.fit_bounds([[LAT_S, LON_W], [LAT_N, LON_E]])
-    m.get_root().header.add_child(Element("<title>ECMWF forecast, southeast Asia</title>"))
+    m.get_root().header.add_child(Element("<title>ECMWF forecast, southeast Asia and Japan</title>"))
     m.get_root().header.add_child(Element(f"<style>{(HERE / 'viewer.css').read_text()}</style>"))
     m.get_root().html.add_child(Element((HERE / "viewer.html").read_text()))
     js = (HERE / "viewer.js").read_text()

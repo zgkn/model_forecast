@@ -1,6 +1,7 @@
 # model_forecast
 
-Interactive forecast map of **southeast Asia** (88-150E, 12S-30N) from the latest ECMWF open data, one tab per
+Interactive forecast map of **southeast Asia and Japan** (88-156E, 12S-56N: southeast Asia plus Japan with a 10 degree
+buffer) from the latest ECMWF open data, one tab per
 model (**IFS** and **AIFS**), with a time slider over every forecast step.
 
 ```
@@ -86,11 +87,12 @@ current tab; click or drag on the charts to move the time slider. The places:
 | West, Central, South Kalimantan | provinces, same source |
 | Cambodia | whole country, Natural Earth admin-0 outline (about 240 grid cells) |
 | Kota Tinggi, Mersing (Johor) | districts, geoBoundaries ADM2 outlines (about 4.5 and 3.6 grid cells) |
+| Kyushu (Japan) | the 7 prefectures of the island merged into one outline (Natural Earth admin-1; the far southern Kagoshima islands left out), about 63 grid cells |
 | Singapore | box, 0.5 x 0.5 degrees (the 2 x 2 grid cells around the island) |
 
-* **Outlines:** `regions.geojson` (27 KB) holds the province, country and district outlines, rounded and simplified to 0.01
+* **Outlines:** `regions.geojson` (40 KB) holds the province, country and district outlines, rounded and simplified to 0.01
   degrees from Natural Earth 10m admin-1 and admin-0 (public domain) and, for the Johor districts, geoBoundaries gbOpen ADM2
-  (CC BY 4.0, https://www.geoboundaries.org; credited in the page footer). `python tools/make_regions.py` rebuilds it; add a province or country by adding a line to
+  (CC BY 4.0, https://www.geoboundaries.org; credited in the page footer). `python tools/make_regions.py` rebuilds it (areas made of several admin-1 units, like Kyushu, are dissolved into one outline); add a province or country by adding a line to
   `REGIONS` there; the page picks it up with no other change.
   Natural Earth draws boundaries as it sees them, including in disputed areas.
 * **On the map:** every area with a time series is always outlined (solid dark line with a white halo, drawn above the wind
@@ -136,12 +138,14 @@ current tab; click or drag on the charts to move the time slider. The places:
 | `--out` | `output/index.html` | |
 
 Steps: IFS every 3 h (6 h after +144 h on 00/12 UTC runs); AIFS every 6 h. The region is set by
-`LAT_N/LAT_S/LON_W/LON_E` at the top of `wind_forecast.py` (regenerate `coastlines.geojson` with
-`tools/make_coastlines.mjs` after changing it).
+`LAT_N/LAT_S/LON_W/LON_E` at the top of `wind_forecast.py`; after changing it, set the same box in
+`tools/make_coastlines.mjs` and regenerate `coastlines.geojson` / `land.geojson` (`cd tools && npm install world-atlas@2
+topojson-client@3 && node make_coastlines.mjs`). The 273 x 273 grid is about 1.8 times the data of the earlier 88-150E,
+12S-30N region, so a run is ~1.8 times larger to download, cache and load in the browser.
 
 ## Data cache (the `data` branch)
 
-Downloading a run takes a while, so the cropped region (int16, ~27 MB for both models, plus the small CDD files) is kept in
+Downloading a run takes a while, so the cropped region (int16, ~50 MB for both models, plus the small CDD files) is kept in
 `cache/<model>_<run>.npz`. When a newer run exists the old file is deleted. In CI the cache lives on the `data`
 branch: a single commit that the workflow force-pushes whenever there is a new run, so the history never grows.
 
