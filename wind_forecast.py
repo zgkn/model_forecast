@@ -39,6 +39,7 @@ from ecmwf.opendata import Client
 
 import cams
 import cdd
+import timeseries
 
 HERE = Path(__file__).resolve().parent
 LEVELS = [925, 850, 700]  # wind levels (hPa); humidity is taken at RH_LEVEL
@@ -411,6 +412,7 @@ def write_model(model, path, max_step, data_dir):
         "valid": [int(run.timestamp()) + s * 3600 for s in steps],
         "interval": [0] + [b - a for a, b in zip(steps, steps[1:])],
         "files": files,
+        "sg": timeseries.nwp_series(u, v, rh, tp, GRID, LEVELS),
     }
 
 
@@ -429,6 +431,7 @@ def write_cams(path, data_dir):
         "interval": [0] + [b - a for a, b in zip(steps, steps[1:])],
         "files": {"aod": file},
         "shading": [{"value": "aod", "label": "Organic matter AOD 550 nm"}],
+        "sg": timeseries.aod_series(c["aod_q"] * cams.STEP_Q, GRID),
     }
 
 
@@ -525,6 +528,7 @@ def main():
         "grid": {"lat0": LAT_N, "lon0": LON_W, "d": STEP, "nlat": NY, "nlon": NX,
                  "bounds": [[LAT_S, LON_W], [LAT_N, LON_E]]},
         "levels": LEVELS, "rhLevel": RH_LEVEL, "palettes": PALETTES,
+        "sg": {"name": timeseries.PLACE["name"], "box": timeseries.box(GRID)},
         "models": {m: write_model(m, p, args.max_step, data_dir) for m, p in paths.items()},
     }
     land = None
