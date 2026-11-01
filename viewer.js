@@ -653,9 +653,10 @@ window.addEventListener("load", function () {
   var SG_VARS = {
     nwp: [["w" + M.levels[0], M.levels[0] + " hPa wind"], ["w" + M.levels[1], M.levels[1] + " hPa wind"], ["w" + M.levels[2], M.levels[2] + " hPa wind"],
           ["dir", "Wind direction"], ["rain", "Rain"], ["cum", "Rain total"], ["rh", "RH " + M.rhLevel + " hPa"]],
-    cams: [["aod", "Organic matter AOD"], ["ws", "IFS wind speed"], ["dir", "IFS wind direction"]]
+    cams: [["aod", "Organic matter AOD"], ["w" + M.levels[0], "IFS " + M.levels[0] + " hPa wind"], ["w" + M.levels[1], "IFS " + M.levels[1] + " hPa wind"],
+           ["w" + M.levels[2], "IFS " + M.levels[2] + " hPa wind"], ["dir", "IFS wind direction"]]
   };
-  var SG_DEFAULT = { nwp: ["w" + M.levels[0], "w" + M.levels[1], "w" + M.levels[2], "rain", "rh"], cams: ["aod", "ws"] };
+  var SG_DEFAULT = { nwp: ["w" + M.levels[0], "w" + M.levels[1], "w" + M.levels[2], "rain", "rh"], cams: ["aod", "w" + M.levels[0], "w" + M.levels[1], "dir"] };
   var sgSel = {};
   try { sgSel = JSON.parse(localStorage.getItem("wv-sg-vars") || "{}") || {}; } catch (e) { sgSel = {}; }
   function sgGroup() { return M.models[state.model].shading ? "cams" : "nwp"; }
@@ -664,7 +665,8 @@ window.addEventListener("load", function () {
   }
   function sgChosen() {                     // chosen variable ids of this tab, only ones that exist
     var g = sgGroup(), ids = sgVars(g).map(function (v) { return v[0]; });
-    var c = (Array.isArray(sgSel[g]) ? sgSel[g] : SG_DEFAULT[g]).filter(function (id) { return ids.indexOf(id) >= 0; });
+    var c = (Array.isArray(sgSel[g]) ? sgSel[g] : SG_DEFAULT[g]).map(function (id) { return id === "ws" ? "w" + M.levels[0] : id; })   // "ws" was the single wind chip of an earlier version
+      .filter(function (id, k, a) { return ids.indexOf(id) >= 0 && a.indexOf(id) === k; });
     return c.length ? c : SG_DEFAULT[g].slice();
   }
   function sgToggle(id) {
@@ -691,13 +693,16 @@ window.addEventListener("load", function () {
     if (!s) return null;
     var specs = [], tag = sgStat === "max" ? " · max of cells" : "";
     if (d.shading) {                        // CAMS: its AOD, and the wind of the model it borrows
-      var f = d.flowFrom && M.models[d.flowFrom], lv = state.level;
+      var f = d.flowFrom && M.models[d.flowFrom], fs = sgOf(f);
       if (has("aod")) specs.push({ title: "Organic matter AOD at 550 nm" + tag, kind: "line", floor: 1, series: [{ cls: "sg-aod", t: d.valid, v: s.aod }] });
-      var fs = sgOf(f);
-      if (fs && has("ws")) specs.push({ title: f.label + " wind speed at " + lv + " hPa (kt)" + tag, kind: "line", floor: 10,
-                                               series: [{ cls: "sg-l1", t: f.valid, v: fs.speed[lv] }] });
-      if (fs && has("dir")) specs.push({ title: f.label + " wind direction at " + lv + " hPa (from, °)", kind: "dots", fixed: 360, ticks: [0, 90, 180, 270, 360],
-                                                series: [{ sw: "sw1", t: f.valid, v: fs.dir[lv] }] });
+      var wl = M.levels.filter(function (l) { return has("w" + l); });
+      if (fs && wl.length) specs.push({ title: f.label + " wind speed (kt)" + tag, kind: "line", floor: 10,
+        series: wl.map(function (l) { var i = M.levels.indexOf(l); return { cls: "sg-l" + (i + 1), sw: "sw" + (i + 1), label: l + " hPa", t: f.valid, v: fs.speed[l] }; }) });
+      if (fs && has("dir")) {
+        var dl = wl.length ? wl : [M.levels[0]];
+        specs.push({ title: f.label + " wind direction (from, \u00b0)", kind: "dots", fixed: 360, ticks: [0, 90, 180, 270, 360],
+          series: dl.map(function (l) { var i = M.levels.indexOf(l); return { sw: "sw" + (i + 1), label: l + " hPa", t: f.valid, v: fs.dir[l] }; }) });
+      }
       return specs;
     }
     var lvls = M.levels.filter(function (l) { return has("w" + l); });
@@ -726,7 +731,7 @@ window.addEventListener("load", function () {
   }
 
   function sgRender() {
-    sgSig = state.model + "/" + state.level + "/" + sgPlace + "/" + sgStat;
+    sgSig = state.model + "/" + sgPlace + "/" + sgStat;
     var d = M.models[state.model], specs = sgSpec(), box = el("wv-sg-chart");
     var pl = sgPlaceObj(), bx = pl.box;
     el("wv-sg-place").value = sgPlace;
@@ -822,7 +827,10 @@ window.addEventListener("load", function () {
     if (d.shading) {
       p.push("AOD " + s.aod[i].toFixed(2));
       var f = d.flowFrom && M.models[d.flowFrom], fs = sgOf(f), j = fs ? f.valid.indexOf(d.valid[i]) : -1;
-      if (j >= 0) p.push(f.label + " " + state.level + " hPa wind " + Math.round(fs.speed[state.level][j]) + " kt" + (fs.dir ? " from " + pad3(fs.dir[state.level][j]) + "°" : ""));
+      var chosen = sgChosen(), wl = M.levels.filter(function (l) { return chosen.indexOf("w" + l) >= 0; });
+      if (j >= 0) (wl.length ? wl : chosen.indexOf("dir") >= 0 ? [M.levels[0]] : []).forEach(function (l) {
+        p.push(f.label + " " + l + " hPa " + (chosen.indexOf("w" + l) >= 0 ? Math.round(fs.speed[l][j]) + " kt" : "") + (fs.dir && chosen.indexOf("dir") >= 0 ? " from " + pad3(fs.dir[l][j]) + "°" : ""));
+      });
     } else {
       M.levels.forEach(function (l) { p.push(l + " hPa " + Math.round(s.speed[l][i]) + " kt" + (s.dir ? " from " + pad3(s.dir[l][i]) + "°" : "")); });
       if (d.interval[i]) p.push("rain " + s.rain[i].toFixed(1) + " mm in " + d.interval[i] + " h");
@@ -851,7 +859,7 @@ window.addEventListener("load", function () {
   }
   function sgUpdate() {
     if (!sgOpen) return;
-    if (sgSig !== state.model + "/" + state.level + "/" + sgPlace + "/" + sgStat) sgRender(); else sgNow();
+    if (sgSig !== state.model + "/" + sgPlace + "/" + sgStat) sgRender(); else sgNow();
   }
   var sgLayers = {};                        // place id -> Leaflet layer of its box or outline
   var SG_STYLE = { color: "#1a1a19", weight: 1.6, fillColor: "#ffffff", fillOpacity: 0.08 };

@@ -110,8 +110,8 @@ current tab; click or drag on the charts to move the time slider. The places:
 * **Remember:** the cells are 0.25 degree model grid cells (about 28 km), so a province maximum is a model-grid maximum,
   smoother than a station would see, and larger provinces have more cells to produce a high maximum.
 * IFS / AIFS: wind speed at 925 / 850 / 700 hPa, wind direction, rain per model interval (3 h IFS, 6 h AIFS) as bars,
-  rain total since +0 h, RH at 700 hPa. CAMS: organic matter AOD, and the IFS wind speed and direction at the level
-  chosen in the Flow menu. Chips above the charts choose what is drawn (at least one stays on); the choice and the tab
+  rain total since +0 h, RH at 700 hPa. CAMS: organic matter AOD, and the IFS wind speed (925 / 850 / 700 hPa, any combination)
+  and direction, shown for 925 and 850 hPa by default; the Flow menu does not change these charts. Chips above the charts choose what is drawn (at least one stays on); the choice and the tab
   are remembered in the browser.
 * The numbers are computed at build time (`timeseries.py`) and embedded in the page (about 5 KB per place and model), so
   the panel opens instantly and needs no extra download. On phones the panel is a sheet above the time slider.
