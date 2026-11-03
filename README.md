@@ -177,7 +177,7 @@ from the default branch.
 * `wind_forecast.py` - download, cache and site build
 * `viewer.html`, `viewer.css`, `viewer.js` - the UI that is inlined into the Folium page
 * `cdd.py`, `cams.py`, `timeseries.py`, `tests/` - consecutive-dry-days engine, CAMS download, area time series and their tests
-* `.claude/skills/generate-latest/SKILL.md` - the `/generate-latest` command for Claude Code: triggers the workflow, waits and
-  reports which IFS / AIFS / CAMS runs went live
+* `.claude/skills/generate-latest/SKILL.md` - the `/generate-latest` command for Claude Code: just triggers the workflow (no waiting,
+  no report)
 * `regions.geojson`, `tools/make_regions.py` - province outlines for the area time series (`python -m pytest`)
 * `coastlines.geojson`, `land.geojson`, `tools/make_coastlines.mjs` - coastline/border/land data and its generator
