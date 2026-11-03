@@ -1,7 +1,6 @@
 # model_forecast
 
-Interactive forecast map of **southeast Asia and Japan** (88-156E, 12S-56N: southeast Asia plus Japan with a 10 degree
-buffer) from the latest ECMWF open data, one tab per
+Interactive forecast map of **southeast Asia and Japan** (84-156E, 12S-50N) from the latest ECMWF open data, one tab per
 model (**IFS** and **AIFS**), with a time slider over every forecast step.
 
 ```
@@ -140,7 +139,7 @@ current tab; click or drag on the charts to move the time slider. The places:
 Steps: IFS every 3 h (6 h after +144 h on 00/12 UTC runs); AIFS every 6 h. The region is set by
 `LAT_N/LAT_S/LON_W/LON_E` at the top of `wind_forecast.py`; after changing it, set the same box in
 `tools/make_coastlines.mjs` and regenerate `coastlines.geojson` / `land.geojson` (`cd tools && npm install world-atlas@2
-topojson-client@3 && node make_coastlines.mjs`). The 273 x 273 grid is about 1.8 times the data of the earlier 88-150E,
+topojson-client@3 && node make_coastlines.mjs`). The 249 x 289 grid is about 1.7 times the data of the earlier 88-150E,
 12S-30N region, so a run is ~1.8 times larger to download, cache and load in the browser.
 
 ## Data cache (the `data` branch)

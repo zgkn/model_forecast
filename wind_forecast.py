@@ -44,8 +44,8 @@ import timeseries
 HERE = Path(__file__).resolve().parent
 LEVELS = [925, 850, 700]  # wind levels (hPa); humidity is taken at RH_LEVEL
 RH_LEVEL = 700
-# Region: 88-150E, 12S-30N
-LAT_N, LAT_S, LON_W, LON_E = 56.0, -12.0, 88.0, 156.0     # southeast Asia plus Japan with a 10 degree buffer
+# Region: 84-156E, 12S-50N (southeast Asia plus Japan with a buffer)
+LAT_N, LAT_S, LON_W, LON_E = 50.0, -12.0, 84.0, 156.0
 STEP = 0.25  # source grid spacing in degrees
 NY = round((LAT_N - LAT_S) / STEP) + 1
 NX = round((LON_E - LON_W) / STEP) + 1
