@@ -17,6 +17,15 @@
       <button type="button" data-style="off" aria-pressed="false">Off</button>
     </div>
   </div>
+  <div class="wv-row wv-controls" id="wv-acc-controls" hidden>
+    <label>Rain accumulated over <input id="wv-acc-days" type="number" min="1" max="15" step="1" inputmode="numeric"> days</label>
+    <div id="wv-acc-quick" role="group" aria-label="Quick periods in days">
+      <button type="button" data-days="1">1 d</button>
+      <button type="button" data-days="2">2 d</button>
+      <button type="button" data-days="3">3 d</button>
+      <button type="button" data-days="5">5 d</button>
+    </div>
+  </div>
   <div class="wv-row wv-controls" id="wv-cdd-controls" hidden>
     <span class="wv-label">Dry-spell outlines</span>
     <label><input type="checkbox" data-level="5" checked> &ge; 5 days</label>

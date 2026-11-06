@@ -96,6 +96,15 @@ def _cdd_colors(n=15):
 PALETTES["cdd"] = {"unit": "days", "edges": list(range(1, 16)), "colors": _cdd_colors(),
                    "alpha": [0.0] + [0.8] * 15, "ticks": [1, 5, 10, 15]}
 
+# rain accumulated over a user-chosen number of days (rolling window ending at the shown step), mm; top class is 300 and above
+PALETTES["accum"] = {
+    "unit": "mm",
+    "edges": [1, 5, 10, 25, 50, 75, 100, 150, 200, 300],
+    "colors": ["#ffffff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#3182bd", "#08519c", "#6a51a3", "#54278f", "#3f007d", "#2d004b"],
+    "alpha": [0.0] + [0.75] * 10,
+    "ticks": [1, 10, 50, 100, 300],
+}
+
 # CAMS organic matter AOD at 550 nm: 0 .. 5 colour scale (top class is 5 and above)
 PALETTES["aod"] = {
     "unit": "",

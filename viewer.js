@@ -13,7 +13,7 @@ window.addEventListener("load", function () {
 
   var el = function (id) { return document.getElementById(id); };
   var models = Object.keys(M.models);
-  var state = { view: "map", lastShade: {}, model: models[0], t: 0, day: null, shade: "speed" + M.levels[0], prevShade: null,
+  var state = { accDays: 3, view: "map", lastShade: {}, model: models[0], t: 0, day: null, shade: "speed" + M.levels[0], prevShade: null,
                 level: M.levels[0], style: "arrows" };
   var timer = null;
 
@@ -53,8 +53,8 @@ window.addEventListener("load", function () {
     return pending[key];
   }
 
-  function shadeKind() { return state.shade.indexOf("speed") === 0 ? "speed" : state.shade === "rain" ? "rain" : state.shade === "cdd" ? "cdd" : state.shade === "aod" ? "aod" : "rh"; }
-  function shadeFile() { return state.shade === "rh" ? "rh" + M.rhLevel : state.shade; }
+  function shadeKind() { return state.shade.indexOf("speed") === 0 ? "speed" : state.shade === "rain" ? "rain" : state.shade === "cdd" ? "cdd" : state.shade === "aod" ? "aod" : state.shade === "accum" ? "accum" : "rh"; }
+  function shadeFile() { return state.shade === "rh" ? "rh" + M.rhLevel : state.shade === "accum" ? "rain" : state.shade; }
   function neededFiles() {                  // [model, file] pairs for the current frame
     var m = state.model, f;
     if (inCdd()) return [[m, "cdd"]];
@@ -78,7 +78,7 @@ window.addEventListener("load", function () {
   var LUTS = {};
   function lut(kind) {
     if (LUTS[kind]) return LUTS[kind];
-    var P = M.palettes[kind], vmax = { speed: 150, rain: 300, rh: 100, cdd: 40, aod: 6 }[kind], scale = { speed: 4, rain: 10, rh: 4, cdd: 1, aod: 100 }[kind];
+    var P = M.palettes[kind], vmax = { speed: 150, rain: 300, rh: 100, cdd: 40, aod: 6, accum: 400 }[kind], scale = { speed: 4, rain: 10, rh: 4, cdd: 1, aod: 100, accum: 2 }[kind];
     var n = Math.ceil(vmax * scale) + 1, t = new Uint32Array(n);
     var rgba = P.colors.map(function (c, i) {
       var r = parseInt(c.substr(1, 2), 16), g = parseInt(c.substr(3, 2), 16), b = parseInt(c.substr(5, 2), 16);
@@ -164,11 +164,23 @@ window.addEventListener("load", function () {
   var field = new Float32Array(N);
   var shadeSrc = null;                       // {canvas, bounds} of the last rendered raster
 
+  function accWindow() {                   // rolling window of state.accDays days that ends at the shown step
+    var d = M.models[state.model], e = state.t, endS = d.valid[e], startS = endS - state.accDays * 86400, i0 = 0;
+    while (i0 <= e && d.valid[i0] <= startS) i0++;           // first step whose interval ends after the window start
+    var have = endS - d.valid[0];
+    return { i0: Math.max(i0, 1), e: e, startS: startS, endS: endS, have: have, partial: have < state.accDays * 86400 };
+  }
+
   function fillField() {                    // shading variable in display units for the current frame
     var kind = shadeKind(), i;
     if (kind === "speed") {
       var uv = get(shadeFile().replace(/^speed/, "uv")), b = state.t * 2 * N, k = 0.1 * KT;
       for (i = 0; i < N; i++) field[i] = Math.hypot(uv[b + i], uv[b + N + i]) * k;
+    } else if (kind === "accum") {          // rain summed over the rolling window (the file holds 0.1 mm per model interval)
+      var rn = get("rain"), w = accWindow();
+      field.fill(0);
+      for (var st = w.i0; st <= w.e; st++) { var ro = st * N; for (i = 0; i < N; i++) field[i] += rn[ro + i]; }
+      for (i = 0; i < N; i++) field[i] *= 0.1;
     } else if (kind === "cdd") {
       var c = get("cdd"), o = state.day * N;
       for (i = 0; i < N; i++) field[i] = c[o + i] === 255 ? NaN : c[o + i];
@@ -459,6 +471,11 @@ window.addEventListener("load", function () {
     if (kind === "rh") return "Relative humidity at " + M.rhLevel + " hPa (%)";
     if (kind === "cdd") return "Consecutive dry days: longest spell so far";
     if (kind === "aod") return "Organic matter aerosol optical depth at 550 nm (CAMS)";
+    if (kind === "accum") {
+      var w = accWindow();
+      return w.partial ? "Rain accumulated over the first " + Math.round(w.have / 3600) + " h (mm)" :
+        "Rain accumulated over " + state.accDays + (state.accDays === 1 ? " day" : " days") + " (mm)";
+    }
     var iv = M.models[state.model].interval[state.t];
     return iv ? "Rain in the preceding " + iv + " h (mm)" : "Rain (none at +0 h)";
   }
@@ -466,8 +483,13 @@ window.addEventListener("load", function () {
     var kind = shadeKind(), P = M.palettes[kind], bar = el("wv-legend-bar"), ticks = el("wv-legend-ticks");
     el("wv-legend-title").textContent = legendTitle();
     var note = el("wv-legend-note");
-    note.hidden = kind !== "cdd" && kind !== "aod";
+    note.hidden = kind !== "cdd" && kind !== "aod" && kind !== "accum";
     if (kind === "aod") note.textContent = "Generated using Copernicus Atmosphere Monitoring Service information.";
+    if (kind === "accum") {
+      var aw = accWindow(), span = fmt(Math.max(aw.startS, M.models[state.model].valid[0]), { day: "2-digit", month: "short", hour: "2-digit" }) + "Z \u2192 " +
+        fmt(aw.endS, { day: "2-digit", month: "short", hour: "2-digit" }) + "Z";
+      note.textContent = "Window " + span + (aw.partial ? ". Only " + Math.round(aw.have / 3600) + " h of forecast so far; " + state.accDays + " d asked for." : ".");
+    }
     if (kind === "cdd") {
       note.textContent = "Days under " + cddOf(state.model).dryMm + " mm (UTC), counted from the first forecast day. " +
         "Outlines: ≥ 5 d dashed, ≥ 10 d thin, ≥ 15 d thick.";
@@ -509,7 +531,7 @@ window.addEventListener("load", function () {
       if (shadeArr && shadeSrc && state.shade !== "speed" + state.level && gx >= 0 && gy >= 0 && gx <= NX - 1 && gy <= NY - 1) {
         var v = field[Math.round(gy) * NX + Math.round(gx)];
         parts.push(state.shade.indexOf("speed") === 0 ? state.shade.replace("speed", "") + " hPa wind " + v.toFixed(0) + " kt" :
-          state.shade === "rain" ? v.toFixed(1) + " mm" : state.shade === "aod" ? "organic matter AOD " + v.toFixed(2) : "RH " + v.toFixed(0) + "%");
+          state.shade === "rain" ? v.toFixed(1) + " mm" : state.shade === "accum" ? v.toFixed(0) + " mm in " + (accWindow().partial ? "the first " + Math.round(accWindow().have / 3600) + " h" : state.accDays + " d") : state.shade === "aod" ? "organic matter AOD " + v.toFixed(2) : "RH " + v.toFixed(0) + "%");
       }
     }
     ro.textContent = parts.join(" · "); ro.hidden = false;
@@ -590,6 +612,7 @@ window.addEventListener("load", function () {
     el("wv-level").disabled = noWind;
     document.querySelectorAll("#wv-style button").forEach(function (b) { b.disabled = noWind; });
     el("wv-cdd-controls").hidden = !cdd;
+    el("wv-acc-controls").hidden = state.shade !== "accum";
     if (cdd && cddOf(state.model)) el("wv-nc").href = cddOf(state.model).files.nc;
     var opt = shadeSel.querySelector('option[value="cdd"]');
     if (opt) opt.disabled = !cddOf(state.model);
@@ -602,7 +625,7 @@ window.addEventListener("load", function () {
     var d = M.models[model];
     if (d.shading) return d.shading.map(function (o) { return [o.value, o.label]; });
     var o = M.levels.map(function (l) { return ["speed" + l, "Wind speed " + l + " hPa"]; });
-    o.push(["rain", "Rain"], ["rh", "Relative humidity " + M.rhLevel + " hPa"]);
+    o.push(["rain", "Rain"], ["accum", "Accumulated rain"], ["rh", "Relative humidity " + M.rhLevel + " hPa"]);
     if (cddOf(model)) o.push(["cdd", "Consecutive dry days"]);
     return o;
   }
@@ -1062,6 +1085,19 @@ window.addEventListener("load", function () {
     syncControls();
     refresh();
   });
+  function setAccDays(n, keepText) {        // period of the accumulated-rain layer, 1 to 15 days
+    n = Math.min(15, Math.max(1, Math.round(+n) || state.accDays));
+    state.accDays = n;
+    try { localStorage.setItem("wv-acc-days", String(n)); } catch (e) { /* storage blocked */ }
+    if (!keepText) el("wv-acc-days").value = n;
+    document.querySelectorAll("#wv-acc-quick button").forEach(function (b) { b.setAttribute("aria-pressed", String(+b.dataset.days === n)); });
+    if (state.shade === "accum") refresh();
+  }
+  try { var savedDays = +localStorage.getItem("wv-acc-days"); if (savedDays >= 1 && savedDays <= 15) state.accDays = Math.round(savedDays); } catch (e) { /* storage blocked */ }
+  el("wv-acc-days").addEventListener("input", function () { if (this.value !== "") setAccDays(this.value, true); });
+  el("wv-acc-days").addEventListener("change", function () { setAccDays(this.value); });
+  document.querySelectorAll("#wv-acc-quick button").forEach(function (b) { b.addEventListener("click", function () { setAccDays(b.dataset.days); }); });
+  setAccDays(state.accDays);
   levelSel.addEventListener("change", function () { state.level = +levelSel.value; refresh(); });
   document.querySelectorAll("#wv-style button").forEach(function (b) {
     b.addEventListener("click", function () {

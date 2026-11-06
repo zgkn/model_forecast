@@ -75,6 +75,16 @@ A **CAMS** tab shows the CAMS global forecast of organic matter aerosol optical 
   wind file of one level (~3.5 MB) is loaded only when the CAMS tab is shown.
 * Data: Generated using Copernicus Atmosphere Monitoring Service information.
 
+## Accumulated rain
+
+The Shading menu of the IFS and AIFS tabs has **Accumulated rain**: rain summed over a **rolling window of N days that ends
+at the time on the slider**. N is typed in the box (1 to 15) or chosen with the 1 / 2 / 3 / 5 d buttons, and is remembered in
+the browser. The page sums the per-interval rain it already holds (0.1 mm per model interval), so nothing extra is
+downloaded and a change of N redraws at once. The window is the N x 24 h before the slider time, so it always ends on a
+model step; the legend note gives its start and end. Early in the run, when fewer than N days of forecast precede the
+slider time, the window is cut at the start of the run and both the title and the note say so ("over the first 48 h",
+"Only 48 h of forecast so far"). Colour scale: 1, 5, 10, 25, 50, 75, 100, 150, 200, 300 mm (top class 300+).
+
 ## Area time series (provinces and a box)
 
 Click a province outline or the Singapore box (or pick the place in the panel's menu) to get the time series of the
