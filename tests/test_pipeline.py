@@ -7,7 +7,7 @@ import wind_forecast as wf
 
 def make_cache(tmp_path, model="ifs", stamp="2026102412"):
     ny, nx = wf.NY, wf.NX
-    z = np.zeros((1, len(wf.LEVELS), ny, nx), "float32")
+    z = np.zeros((1, len(wf.WIND_KEYS), ny, nx), "float32")
     path = tmp_path / f"{model}_{stamp}.npz"
     wf.save_cache(path, [0], z, z, np.zeros((1, ny, nx), "float32"), np.zeros((1, ny, nx), "float32"), 144)
     return path
@@ -50,7 +50,7 @@ def fake_download(monkeypatch, run_hour, published_up_to, calls):
         return {"step": step} if step <= published_up_to[0] else None
 
     def read_step(files):
-        z = np.full((len(wf.LEVELS), 2, 2), float(files["step"]), "float32")
+        z = np.full((len(wf.WIND_KEYS), 2, 2), float(files["step"]), "float32")
         return z, z, np.zeros((2, 2), "float32"), np.zeros((2, 2), "float32")
 
     monkeypatch.setattr(wf, "fetch_step", fetch_step)
@@ -91,8 +91,37 @@ def test_a_06z_run_stops_at_144_and_is_not_refetched(tmp_path, monkeypatch):
 def test_a_cache_written_for_144_h_is_extended_for_a_00z_run(tmp_path, monkeypatch):
     calls = []
     run = fake_download(monkeypatch, 0, [360], calls)
-    z = np.zeros((1, len(wf.LEVELS), 2, 2), "float32")
+    z = np.zeros((1, len(wf.WIND_KEYS), 2, 2), "float32")
     old = wf.cache_file(tmp_path, "ifs", run)
     wf.save_cache(old, [0], z, z, np.zeros((1, 2, 2), "float32"), np.zeros((1, 2, 2), "float32"), 144)
     wf.fetch_model("ifs", "google", 240, tmp_path, 1)
     assert calls and np.load(old)["steps"].tolist()[-1] == 240
+
+
+# ---- the 10 m wind is one more wind "level" ----------------------------------------------------------------------
+
+def test_wind_levels_end_with_the_surface_wind():
+    assert wf.WIND_KEYS == wf.LEVELS + [wf.SURFACE] and wf.SURFACE == "sfc"
+
+
+def test_an_older_cache_without_the_surface_wind_is_not_used(tmp_path):
+    path = make_cache(tmp_path)
+    z = dict(np.load(path))
+    del z["nwind"]                                           # what caches written before the 10 m wind look like
+    old = tmp_path / "ifs_2026102400.npz"
+    np.savez_compressed(old, **z)
+    assert wf.load_cache(path) is not None and wf.load_cache(old) is None
+
+
+def test_site_files_include_the_surface_wind(tmp_path):
+    ny, nx, n = wf.NY, wf.NX, 3
+    rng = np.random.default_rng(1)
+    u = rng.normal(size=(n, len(wf.WIND_KEYS), ny, nx)).astype("float32")
+    path = tmp_path / "ifs_2026110700.npz"
+    wf.save_cache(path, [0, 3, 6], u, u, np.full((n, ny, nx), 50, "float32"), np.zeros((n, ny, nx), "float32"), 6)
+    data = tmp_path / "site" / "data"
+    data.mkdir(parents=True)
+    entry = wf.write_model("ifs", path, 240, data)
+    assert set(entry["files"]) >= {"uv925", "uv850", "uv700", "uvsfc"}
+    assert (data / "ifs_2026110700_uvsfc.bin.gz").exists()
+    assert set(entry["sg"]["sg"]["mean"]["speed"]) == {"925", "850", "700", "sfc"}

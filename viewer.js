@@ -12,6 +12,7 @@ window.addEventListener("load", function () {
   var CDD_LEVELS = [5, 10, 15];
 
   var el = function (id) { return document.getElementById(id); };
+  function lvl(l) { return l === "sfc" ? "10 m" : l + " hPa"; }     // wind levels are pressures in hPa, or "sfc" for the 10 m wind
   var models = Object.keys(M.models);
   var state = { accDays: 3, view: "map", lastShade: {}, model: models[0], t: 0, day: null, shade: "speed" + M.levels[0], prevShade: null,
                 level: M.levels[0], style: "arrows" };
@@ -467,7 +468,7 @@ window.addEventListener("load", function () {
 
   function legendTitle() {
     var kind = shadeKind();
-    if (kind === "speed") return "Wind speed at " + state.shade.replace("speed", "") + " hPa (knots)";
+    if (kind === "speed") return "Wind speed at " + lvl(state.shade.replace("speed", "")) + " (knots)";
     if (kind === "rh") return "Relative humidity at " + M.rhLevel + " hPa (%)";
     if (kind === "cdd") return "Consecutive dry days: longest spell so far";
     if (kind === "aod") return "Organic matter aerosol optical depth at 550 nm (CAMS)";
@@ -526,11 +527,11 @@ window.addEventListener("load", function () {
       var uv = noFlow() ? null : flowArr();
       if (uv && flowBase() >= 0 && state.style !== "off" && sampleUV(uv, flowBase(), e.latlng.lng, e.latlng.lat)) {
         var kt = Math.hypot(su, sv) * 0.1 * KT, from = (270 - Math.atan2(sv, su) / RAD + 360) % 360;
-        parts.push(state.level + " hPa " + (flowModel() === state.model ? "" : M.models[flowModel()].label + " ") + "wind " + kt.toFixed(0) + " kt from " + String(Math.round(from) % 360).padStart(3, "0") + "°");
+        parts.push(lvl(state.level) + " " + (flowModel() === state.model ? "" : M.models[flowModel()].label + " ") + "wind " + kt.toFixed(0) + " kt from " + String(Math.round(from) % 360).padStart(3, "0") + "°");
       }
       if (shadeArr && shadeSrc && state.shade !== "speed" + state.level && gx >= 0 && gy >= 0 && gx <= NX - 1 && gy <= NY - 1) {
         var v = field[Math.round(gy) * NX + Math.round(gx)];
-        parts.push(state.shade.indexOf("speed") === 0 ? state.shade.replace("speed", "") + " hPa wind " + v.toFixed(0) + " kt" :
+        parts.push(state.shade.indexOf("speed") === 0 ? lvl(state.shade.replace("speed", "")) + " wind " + v.toFixed(0) + " kt" :
           state.shade === "rain" ? v.toFixed(1) + " mm" : state.shade === "accum" ? v.toFixed(0) + " mm in " + (accWindow().partial ? "the first " + Math.round(accWindow().have / 3600) + " h" : state.accDays + " d") : state.shade === "aod" ? "organic matter AOD " + v.toFixed(2) : "RH " + v.toFixed(0) + "%");
       }
     }
@@ -561,7 +562,7 @@ window.addEventListener("load", function () {
   function flowNote() {                    // which model's wind is drawn on a tab that has none of its own
     if (!M.models[state.model].flowFrom || state.style === "off") return "";
     var f = M.models[flowModel()];
-    return " · " + state.level + " hPa wind: " + f.label + " " + fmt(f.run, { day: "2-digit", month: "short", hour: "2-digit" }) + "Z run" +
+    return " · " + lvl(state.level) + " wind: " + f.label + " " + fmt(f.run, { day: "2-digit", month: "short", hour: "2-digit" }) + "Z run" +
       (flowIdx() < 0 ? " (not available at this time)" : "");
   }
   function updateAxis() {
@@ -624,7 +625,7 @@ window.addEventListener("load", function () {
   function shadeOptionsFor(model) {
     var d = M.models[model];
     if (d.shading) return d.shading.map(function (o) { return [o.value, o.label]; });
-    var o = M.levels.map(function (l) { return ["speed" + l, "Wind speed " + l + " hPa"]; });
+    var o = M.levels.map(function (l) { return ["speed" + l, "Wind speed " + lvl(l)]; });
     o.push(["rain", "Rain"], ["accum", "Accumulated rain"], ["rh", "Relative humidity " + M.rhLevel + " hPa"]);
     if (cddOf(model)) o.push(["cdd", "Consecutive dry days"]);
     return o;
@@ -674,12 +675,11 @@ window.addEventListener("load", function () {
 
   // which variables are drawn: chips above the charts, remembered per kind of tab (IFS/AIFS share theirs)
   var SG_VARS = {
-    nwp: [["w" + M.levels[0], M.levels[0] + " hPa wind"], ["w" + M.levels[1], M.levels[1] + " hPa wind"], ["w" + M.levels[2], M.levels[2] + " hPa wind"],
-          ["dir", "Wind direction"], ["rain", "Rain"], ["cum", "Rain total"], ["rh", "RH " + M.rhLevel + " hPa"]],
-    cams: [["aod", "Organic matter AOD"], ["w" + M.levels[0], "IFS " + M.levels[0] + " hPa wind"], ["w" + M.levels[1], "IFS " + M.levels[1] + " hPa wind"],
-           ["w" + M.levels[2], "IFS " + M.levels[2] + " hPa wind"], ["dir", "IFS wind direction"]]
+    nwp: M.levels.map(function (l) { return ["w" + l, lvl(l) + " wind"]; })
+      .concat([["dir", "Wind direction"], ["rain", "Rain"], ["cum", "Rain total"], ["rh", "RH " + M.rhLevel + " hPa"]]),
+    cams: [["aod", "Organic matter AOD"]].concat(M.levels.map(function (l) { return ["w" + l, "IFS " + lvl(l) + " wind"]; }), [["dir", "IFS wind direction"]])
   };
-  var SG_DEFAULT = { nwp: ["w" + M.levels[0], "w" + M.levels[1], "w" + M.levels[2], "rain", "rh"], cams: ["aod", "w" + M.levels[0], "w" + M.levels[1], "dir"] };
+  var SG_DEFAULT = { nwp: M.levels.map(function (l) { return "w" + l; }).concat(["rain", "rh"]), cams: ["aod", "w" + M.levels[0], "w" + M.levels[1], "dir"] };
   var sgSel = {};
   try { sgSel = JSON.parse(localStorage.getItem("wv-sg-vars") || "{}") || {}; } catch (e) { sgSel = {}; }
   function sgGroup() { return M.models[state.model].shading ? "cams" : "nwp"; }
@@ -720,21 +720,21 @@ window.addEventListener("load", function () {
       if (has("aod")) specs.push({ title: "Organic matter AOD at 550 nm" + tag, kind: "line", floor: 1, series: [{ cls: "sg-aod", t: d.valid, v: s.aod }] });
       var wl = M.levels.filter(function (l) { return has("w" + l); });
       if (fs && wl.length) specs.push({ title: f.label + " wind speed (kt)" + tag, kind: "line", floor: 10,
-        series: wl.map(function (l) { var i = M.levels.indexOf(l); return { cls: "sg-l" + (i + 1), sw: "sw" + (i + 1), label: l + " hPa", t: f.valid, v: fs.speed[l] }; }) });
+        series: wl.map(function (l) { var i = M.levels.indexOf(l); return { cls: "sg-l" + (i + 1), sw: "sw" + (i + 1), label: lvl(l), t: f.valid, v: fs.speed[l] }; }) });
       if (fs && has("dir")) {
         var dl = wl.length ? wl : [M.levels[0]];
         specs.push({ title: f.label + " wind direction (from, \u00b0)", kind: "dots", fixed: 360, ticks: [0, 90, 180, 270, 360],
-          series: dl.map(function (l) { var i = M.levels.indexOf(l); return { sw: "sw" + (i + 1), label: l + " hPa", t: f.valid, v: fs.dir[l] }; }) });
+          series: dl.map(function (l) { var i = M.levels.indexOf(l); return { sw: "sw" + (i + 1), label: lvl(l), t: f.valid, v: fs.dir[l] }; }) });
       }
       return specs;
     }
     var lvls = M.levels.filter(function (l) { return has("w" + l); });
     if (lvls.length) specs.push({ title: "Wind speed (kt)" + tag, kind: "line", floor: 10,
-      series: lvls.map(function (l) { var i = M.levels.indexOf(l); return { cls: "sg-l" + (i + 1), sw: "sw" + (i + 1), label: l + " hPa", t: d.valid, v: s.speed[l] }; }) });
+      series: lvls.map(function (l) { var i = M.levels.indexOf(l); return { cls: "sg-l" + (i + 1), sw: "sw" + (i + 1), label: lvl(l), t: d.valid, v: s.speed[l] }; }) });
     if (has("dir")) {
       var dl = lvls.length ? lvls : [M.levels[0]];
       specs.push({ title: "Wind direction (from, °)", kind: "dots", fixed: 360, ticks: [0, 90, 180, 270, 360],
-        series: dl.map(function (l) { var i = M.levels.indexOf(l); return { sw: "sw" + (i + 1), label: l + " hPa", t: d.valid, v: s.dir[l] }; }) });
+        series: dl.map(function (l) { var i = M.levels.indexOf(l); return { sw: "sw" + (i + 1), label: lvl(l), t: d.valid, v: s.dir[l] }; }) });
     }
     var iv = d.interval[1] || 3;
     if (has("rain")) specs.push({ title: "Rain in the preceding " + iv + " h (mm)" + tag, kind: "bar", floor: 1, series: [{ t: d.valid, v: s.rain, iv: d.interval }] });
@@ -766,7 +766,11 @@ window.addEventListener("load", function () {
     if (!specs || !specs.length) return;
     var W = Math.max(240, box.clientWidth), PL = 30, PR = 6, PH = window.innerWidth < 760 ? 40 : 54, GAP = 22, AX = 16;
     var t0 = d.valid[0], t1 = d.valid[d.valid.length - 1], span = Math.max(1, t1 - t0), pw = W - PL - PR;
-    var H = specs.length * (PH + GAP) + AX;
+    function legendW(sp) { return sp.series.length > 1 ? sp.series.reduce(function (a, se) { return a + se.label.length * 5.8 + 16; }, 0) : 0; }
+    var tops = specs.map(function (sp) { return legendW(sp) && sp.title.length * 5.6 + legendW(sp) > W - PR - 4 ? GAP + 13 : GAP; });   // room for a second line
+    var ys = [], acc = 0;
+    specs.forEach(function (sp, k) { acc += tops[k]; ys.push(acc); acc += PH; });
+    var H = acc + AX;
     function X(t) { return PL + (t - t0) / span * pw; }
     var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H, role: "img",
                              "aria-label": "Time series at " + pl.name + " for the " + d.label + " tab" });
@@ -775,17 +779,17 @@ window.addEventListener("load", function () {
     var stride = Math.max(1, Math.ceil(midnights.length * 46 / pw));
 
     specs.forEach(function (sp, k) {
-      var y0 = k * (PH + GAP) + GAP, vmax = sp.fixed || 0;
+      var y0 = ys[k], vmax = sp.fixed || 0;
       if (!vmax) {
         var m = 0;
         sp.series.forEach(function (se) { se.v.forEach(function (v, i) { if (se.t[i] >= t0 && se.t[i] <= t1 && v > m) m = v; }); });
         vmax = niceMax(m, sp.floor);
       }
       function Y(v) { return y0 + PH - Math.min(v, vmax) / vmax * PH; }
-      svg.appendChild(svgEl("text", { "class": "sg-title", x: 0, y: y0 - 10 }, sp.title));
+      svg.appendChild(svgEl("text", { "class": "sg-title", x: 0, y: tops[k] > GAP ? y0 - 23 : y0 - 10 }, sp.title));
       var lx = W - PR;                       // legend swatches of multi-line charts, right aligned
       if (sp.series.length > 1) sp.series.slice().reverse().forEach(function (se) {
-        var w = se.label.length * 5.4 + 14;
+        var w = se.label.length * 5.8 + 16;
         lx -= w;
         svg.appendChild(svgEl("rect", { "class": se.sw, x: lx, y: y0 - 17, width: 8, height: 8, rx: 2 }));
         svg.appendChild(svgEl("text", { x: lx + 11, y: y0 - 9 }, se.label));
@@ -818,7 +822,7 @@ window.addEventListener("load", function () {
         svg.appendChild(svgEl("path", { "class": "sg-line " + se.cls, d: dstr }));
       });
     });
-    var ay = specs.length * (PH + GAP) + 2;
+    var ay = H - AX + 2;
     midnights.forEach(function (mt, i) {
       if (i % stride) return;
       var edge = X(mt) > W - PR - 18;       // keep the last label inside the chart
@@ -852,10 +856,10 @@ window.addEventListener("load", function () {
       var f = d.flowFrom && M.models[d.flowFrom], fs = sgOf(f), j = fs ? f.valid.indexOf(d.valid[i]) : -1;
       var chosen = sgChosen(), wl = M.levels.filter(function (l) { return chosen.indexOf("w" + l) >= 0; });
       if (j >= 0) (wl.length ? wl : chosen.indexOf("dir") >= 0 ? [M.levels[0]] : []).forEach(function (l) {
-        p.push(f.label + " " + l + " hPa " + (chosen.indexOf("w" + l) >= 0 ? Math.round(fs.speed[l][j]) + " kt" : "") + (fs.dir && chosen.indexOf("dir") >= 0 ? " from " + pad3(fs.dir[l][j]) + "°" : ""));
+        p.push(f.label + " " + lvl(l) + " " + (chosen.indexOf("w" + l) >= 0 ? Math.round(fs.speed[l][j]) + " kt" : "") + (fs.dir && chosen.indexOf("dir") >= 0 ? " from " + pad3(fs.dir[l][j]) + "°" : ""));
       });
     } else {
-      M.levels.forEach(function (l) { p.push(l + " hPa " + Math.round(s.speed[l][i]) + " kt" + (s.dir ? " from " + pad3(s.dir[l][i]) + "°" : "")); });
+      M.levels.forEach(function (l) { p.push(lvl(l) + " " + Math.round(s.speed[l][i]) + " kt" + (s.dir ? " from " + pad3(s.dir[l][i]) + "°" : "")); });
       if (d.interval[i]) p.push("rain " + s.rain[i].toFixed(1) + " mm in " + d.interval[i] + " h");
       p.push("RH " + s.rh[i] + "%");
     }
@@ -1070,7 +1074,7 @@ window.addEventListener("load", function () {
   phone.addEventListener("change", function (e) { setOpts(!e.matches); });
 
   var shadeSel = el("wv-shade"), levelSel = el("wv-level");
-  M.levels.forEach(function (l) { levelSel.add(new Option(l + " hPa", String(l))); });
+  M.levels.forEach(function (l) { levelSel.add(new Option(lvl(l), String(l))); });
   rebuildShadeOptions();
   levelSel.value = String(state.level);
   shadeSel.addEventListener("change", function () {
@@ -1098,7 +1102,7 @@ window.addEventListener("load", function () {
   el("wv-acc-days").addEventListener("change", function () { setAccDays(this.value); });
   document.querySelectorAll("#wv-acc-quick button").forEach(function (b) { b.addEventListener("click", function () { setAccDays(b.dataset.days); }); });
   setAccDays(state.accDays);
-  levelSel.addEventListener("change", function () { state.level = +levelSel.value; refresh(); });
+  levelSel.addEventListener("change", function () { state.level = isNaN(+levelSel.value) ? levelSel.value : +levelSel.value; refresh(); });
   document.querySelectorAll("#wv-style button").forEach(function (b) {
     b.addEventListener("click", function () {
       state.style = b.dataset.style;

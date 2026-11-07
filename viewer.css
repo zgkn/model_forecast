@@ -6,7 +6,7 @@
   --wv-line: #d9d8d3;
   --wv-accent: #256abf;
   --wv-accent-ink: #ffffff;
-  --sg-1: #256abf; --sg-2: #c26a12; --sg-3: #7a4fb3; --sg-bar: #3a86c8; --sg-rh: #2f8f6a; --sg-aod: #a0481a; --sg-grid: #e6e5e0;
+  --sg-1: #256abf; --sg-2: #c26a12; --sg-3: #7a4fb3; --sg-4: #c2255c; --sg-bar: #3a86c8; --sg-rh: #2f8f6a; --sg-aod: #a0481a; --sg-grid: #e6e5e0;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -17,7 +17,7 @@
     --wv-line: #3d3d3a;
     --wv-accent: #6da7ec;
     --wv-accent-ink: #0d366b;
-    --sg-1: #6da7ec; --sg-2: #f0a25a; --sg-3: #b394e0; --sg-bar: #6da7ec; --sg-rh: #5cc29a; --sg-aod: #e8935a; --sg-grid: #34342f;
+    --sg-1: #6da7ec; --sg-2: #f0a25a; --sg-3: #b394e0; --sg-4: #f06595; --sg-bar: #6da7ec; --sg-rh: #5cc29a; --sg-aod: #e8935a; --sg-grid: #34342f;
   }
 }
 html, body { margin: 0; height: 100%; }
@@ -196,9 +196,9 @@ body.wv-eps-view .leaflet-control-container { display: none !important; }
 #wv-sg-chart .sg-title { fill: var(--wv-ink); font-weight: 600; font-size: 11px; }
 #wv-sg-chart .sg-grid { stroke: var(--sg-grid); stroke-width: 1; }
 #wv-sg-chart .sg-line { fill: none; stroke-width: 1.8; stroke-linejoin: round; }
-#wv-sg-chart .sg-l1 { stroke: var(--sg-1); } #wv-sg-chart .sg-l2 { stroke: var(--sg-2); } #wv-sg-chart .sg-l3 { stroke: var(--sg-3); }
+#wv-sg-chart .sg-l1 { stroke: var(--sg-1); } #wv-sg-chart .sg-l2 { stroke: var(--sg-2); } #wv-sg-chart .sg-l3 { stroke: var(--sg-3); } #wv-sg-chart .sg-l4 { stroke: var(--sg-4); }
 #wv-sg-chart .sg-bar { fill: var(--sg-bar); } #wv-sg-chart .sg-bar-line { stroke: var(--sg-bar); } #wv-sg-chart .sg-rh { stroke: var(--sg-rh); } #wv-sg-chart .sg-aod { stroke: var(--sg-aod); }
-#wv-sg-chart .sw1 { fill: var(--sg-1); } #wv-sg-chart .sw2 { fill: var(--sg-2); } #wv-sg-chart .sw3 { fill: var(--sg-3); }
+#wv-sg-chart .sw1 { fill: var(--sg-1); } #wv-sg-chart .sw2 { fill: var(--sg-2); } #wv-sg-chart .sw3 { fill: var(--sg-3); } #wv-sg-chart .sw4 { fill: var(--sg-4); }
 #wv-sg-chart .sg-now { stroke: var(--wv-ink); stroke-width: 1.2; }
 #wv-sg-chart .sg-hover { stroke: var(--wv-ink-2); stroke-width: 1; stroke-dasharray: 3 2; }
 body.wv-eps-view #wv-sg { display: none !important; }

@@ -43,6 +43,8 @@ import timeseries
 
 HERE = Path(__file__).resolve().parent
 LEVELS = [925, 850, 700]  # wind levels (hPa); humidity is taken at RH_LEVEL
+SURFACE = "sfc"           # the 10 m wind, kept as one more wind "level" after the pressure levels
+WIND_KEYS = LEVELS + [SURFACE]
 RH_LEVEL = 700
 # Region: 84-156E, 12S-50N (southeast Asia plus Japan with a buffer)
 LAT_N, LAT_S, LON_W, LON_E = 50.0, -12.0, 84.0, 156.0
@@ -138,13 +140,14 @@ def candidate_steps(model, hour, max_step):
 
 # ---- download ----------------------------------------------------------------------------------
 
-def fetch_step(client, run, step, tmp, which=("uv", "qt", "tp")):
+def fetch_step(client, run, step, tmp, which=("uv", "qt", "tp", "sfc")):
     """Download the GRIBs of one step; None when the step is not published (yet)."""
     base = dict(type="fc", stream="oper", date=run.strftime("%Y%m%d"), time=run.hour, step=step)
     jobs = {
         "uv": dict(levtype="pl", levelist=LEVELS, param=["u", "v"]),
         "qt": dict(levtype="pl", levelist=RH_LEVEL, param=["q", "t"]),
         "tp": dict(levtype="sfc", param="tp"),
+        "sfc": dict(levtype="sfc", param=["10u", "10v"]),
     }
     files = {}
     for name in which:
@@ -186,17 +189,20 @@ def relative_humidity(q, t, p_hpa):
 
 
 def read_step(files):
-    """u, v (3, ny, nx) m/s, rh (ny, nx) %, accumulated rain (ny, nx) mm for one step."""
+    """u, v (len(WIND_KEYS), ny, nx) m/s (pressure levels, then the 10 m wind), rh (ny, nx) %, accumulated rain (ny, nx) mm."""
     with open_region(files["uv"]) as ds:
         ds = ds.sel(isobaricInhPa=LEVELS)
         u, v = ds.u.values.astype("float32"), ds.v.values.astype("float32")
+    with open_region(files["sfc"]) as ds:
+        u = np.concatenate([u, ds.u10.values.astype("float32")[None]])
+        v = np.concatenate([v, ds.v10.values.astype("float32")[None]])
     with open_region(files["qt"]) as ds:
         rh = relative_humidity(ds.q.values.astype("float32"), ds.t.values.astype("float32"), RH_LEVEL)
     with open_region(files["tp"]) as ds:
         tp = ds.tp.values.astype("float32")
         tp = tp * 1000 if ds.tp.attrs.get("units") == "m" else tp  # IFS: m, AIFS: kg m-2 (= mm)
     for a in (u, v):
-        assert a.shape == (len(LEVELS), NY, NX), a.shape
+        assert a.shape == (len(WIND_KEYS), NY, NX), a.shape
     assert rh.shape == tp.shape == (NY, NX), (rh.shape, tp.shape)
     return u, v, rh, tp
 
@@ -228,7 +234,7 @@ def save_npz(path, **arrays):
 def save_cache(path, steps, u, v, rh, tp, max_step):
     """int16 fields: wind 0.01 m/s, rh 0.1 %, accumulated rain 0.1 mm."""
     save_npz(
-        path, steps=np.array(steps, "int16"), max_step=max_step, region=np.array(REGION),
+        path, steps=np.array(steps, "int16"), max_step=max_step, region=np.array(REGION), nwind=len(WIND_KEYS),
         u=np.round(u * 100).astype("int16"), v=np.round(v * 100).astype("int16"),
         rh=np.round(rh * 10).astype("int16"), tp=np.clip(np.round(tp * 10), 0, 32767).astype("int16"))
 
@@ -236,7 +242,7 @@ def save_cache(path, steps, u, v, rh, tp, max_step):
 def load_cache(path):
     """Cached fields in physical units, or None when written for another region/layout."""
     z = np.load(path)
-    if not np.array_equal(z["region"], REGION):
+    if not np.array_equal(z["region"], REGION) or "nwind" not in z or int(z["nwind"]) != len(WIND_KEYS):   # older caches have no 10 m wind
         return None
     return {"steps": z["steps"].tolist(), "max_step": int(z["max_step"]),
             "u": z["u"].astype("float32") / 100, "v": z["v"].astype("float32") / 100,
@@ -406,7 +412,7 @@ def write_model(model, path, max_step, data_dir):
     tag = f"{model}_{run:%Y%m%d%H}"
     files = {}
 
-    for li, level in enumerate(LEVELS):  # (steps, 2, ny, nx) int16, 0.1 m/s
+    for li, level in enumerate(WIND_KEYS):  # (steps, 2, ny, nx) int16, 0.1 m/s; level is a pressure in hPa or "sfc" (10 m)
         uv = np.stack([u[:, li], v[:, li]], axis=1)
         files[f"uv{level}"] = f"data/{tag}_uv{level}.bin.gz"
         (data_dir / f"{tag}_uv{level}.bin.gz").write_bytes(gz(np.round(uv * 10).astype("<i2")))
@@ -425,7 +431,7 @@ def write_model(model, path, max_step, data_dir):
         "valid": [int(run.timestamp()) + s * 3600 for s in steps],
         "interval": [0] + [b - a for a, b in zip(steps, steps[1:])],
         "files": files,
-        "sg": {pl["id"]: timeseries.nwp_series(u, v, rh, tp, GRID, LEVELS, pl) for pl in timeseries.load_places(GRID)},
+        "sg": {pl["id"]: timeseries.nwp_series(u, v, rh, tp, GRID, WIND_KEYS, pl) for pl in timeseries.load_places(GRID)},
     }
 
 
@@ -526,7 +532,7 @@ def main():
     if not args.fetch_only:              # a cache written for another region (domain change) is unusable
         for model in list(paths):
             if load_cache(paths[model]) is None:
-                warn(f"{model}: cache {paths[model].name} is for another region; leaving {model} out until it is refreshed")
+                warn(f"{model}: cache {paths[model].name} is for another region or an older layout; leaving {model} out until it is refreshed")
                 del paths[model]
         if not paths:
             sys.exit("no usable cached data: run without --no-fetch to download it")
@@ -540,7 +546,7 @@ def main():
     manifest = {
         "grid": {"lat0": LAT_N, "lon0": LON_W, "d": STEP, "nlat": NY, "nlon": NX,
                  "bounds": [[LAT_S, LON_W], [LAT_N, LON_E]]},
-        "levels": LEVELS, "rhLevel": RH_LEVEL, "palettes": PALETTES,
+        "levels": WIND_KEYS, "rhLevel": RH_LEVEL, "palettes": PALETTES,
         "places": timeseries.describe(timeseries.load_places(GRID)),
         "models": {m: write_model(m, p, args.max_step, data_dir) for m, p in paths.items()},
     }

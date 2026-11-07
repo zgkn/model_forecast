@@ -75,6 +75,15 @@ A **CAMS** tab shows the CAMS global forecast of organic matter aerosol optical 
   wind file of one level (~3.5 MB) is loaded only when the CAMS tab is shown.
 * Data: Generated using Copernicus Atmosphere Monitoring Service information.
 
+## 10 m wind
+
+The wind has four levels: 925, 850 and 700 hPa and the **10 m wind** (`10u`, `10v`, published for both IFS and AIFS), written
+`sfc` in the code (`WIND_KEYS`). Everywhere a level is chosen it is one more entry: the Shading menu ("Wind speed 10 m"),
+the Flow menu (arrows and streamlines at 10 m), the CAMS tab's wind overlay, and the time-series chips ("10 m wind", on by
+default). It is one more request per forecast step (about a third more download time) and a fourth wind file per model.
+Caches written before it existed are ignored and refetched once. Open data also has 100 m wind and 10 m gusts (IFS only);
+they are not used.
+
 ## Accumulated rain
 
 The Shading menu of the IFS and AIFS tabs has **Accumulated rain**: rain summed over a **rolling window of N days that ends
