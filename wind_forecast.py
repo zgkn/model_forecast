@@ -9,10 +9,10 @@ midnights out to +360 h from the latest run that has published them (cache/cdd-<
 compact binary data files (one per model and variable) that the page loads on demand
 and draws on canvas layers (shading, arrows, streamlines).
 
-    python wind_forecast.py                    # latest run (download only if not cached), steps up to +144 h
+    python wind_forecast.py                    # latest run (download only if not cached), steps up to +240 h
     python wind_forecast.py --no-fetch         # build from whatever is in the cache, no network to ECMWF
     python wind_forecast.py --fetch-only       # just refresh the cache
-    python wind_forecast.py --max-step 240     # longer range (00/12 UTC IFS runs)
+    python wind_forecast.py --max-step 360     # longest range (00/12 UTC IFS runs and AIFS; 06/18 UTC IFS stops at +144 h)
     python wind_forecast.py --models ifs       # a single model
     python wind_forecast.py --source google    # other open-data mirror
 
@@ -281,7 +281,7 @@ def fetch_model(model, source, max_step, cache_dir, workers):
     path = cache_file(cache_dir, model, run)
     if path.exists():
         cached = load_cache(path)
-        if cached and cached["max_step"] >= max_step:
+        if cached and cached["max_step"] >= max(candidate_steps(model, run.hour, max_step)):   # nothing more to fetch
             print(f"[{model}] run {run:%Y-%m-%d %H}Z already cached", flush=True)
             prune_cache(cache_dir, model, path)
             return path
@@ -304,7 +304,11 @@ def fetch_model(model, source, max_step, cache_dir, workers):
         fields = [read_step(f) for _, f in got]
     cache_dir.mkdir(parents=True, exist_ok=True)
     u, v, rh, tp = (np.stack([f[i] for f in fields]) for i in range(4))
-    save_cache(path, [s for s, _ in got], u, v, rh, tp, max_step)
+    last = got[-1][0]
+    if last < steps[-1]:    # the run was picked once its first 144 h existed; the later steps are published a little afterwards
+        print(f"[{model}] only steps up to +{last} h are published so far (wanted +{steps[-1]} h); "
+              f"the rest is fetched by the next refresh", flush=True)
+    save_cache(path, [s for s, _ in got], u, v, rh, tp, last)   # max_step = how far this cache really goes
     prune_cache(cache_dir, model, path)
     print(f"[{model}] cached -> {path} ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
     return path
@@ -471,7 +475,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--models", nargs="+", choices=list(MODELS) + ["cams"], default=list(MODELS) + ["cams"],
                     help="ifs and aifs (ECMWF open data, with the dry-days layer) and/or cams (needs ADS credentials)")
-    ap.add_argument("--max-step", type=int, default=144, help="last forecast step in hours (default 144)")
+    ap.add_argument("--max-step", type=int, default=240, help="last forecast step in hours (default 240)")
     ap.add_argument("--source", default="google",
                     help="open-data mirror: google, aws, azure, ecmwf (default google; AWS answers 503 Slow Down "
                          "after a new run is released). The other mirrors are tried if it fails.")

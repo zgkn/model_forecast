@@ -138,7 +138,7 @@ current tab; click or drag on the charts to move the time slider. The places:
 | option | default | |
 |---|---|---|
 | `--models ifs aifs cams` | all | models to include; `cams` needs ADS credentials |
-| `--max-step 144` | 144 | last forecast step in hours (IFS 00/12 UTC runs go to 360, 06/18 UTC to 144; AIFS to 360) |
+| `--max-step 240` | 240 | last forecast step in hours (IFS 00/12 UTC runs go to 360, 06/18 UTC to 144; AIFS to 360). 240 is about 1.3 times the data of 144 for IFS and 1.6 times for AIFS; a run whose later steps are not published yet is cached as far as it goes and completed by the next refresh |
 | `--workers 4` | 4 | parallel downloads (S3 answers "503 Slow Down" if hit harder) |
 | `--cache-dir` | `cache/` | where the cropped data is kept |
 | `--no-fetch` / `--fetch-only` | | build from the cache only / refresh the cache only |
