@@ -36,6 +36,10 @@ REGIONS = {
     "ckal": ("admin1", "Indonesia", "Kalimantan Tengah", "Central Kalimantan", "Provinces"),
     "skal": ("admin1", "Indonesia", "Kalimantan Selatan", "South Kalimantan", "Provinces"),
     "khm": ("admin0", None, "Cambodia", "Cambodia", "Countries"),
+    "lao": ("admin0", None, "Laos", "Lao PDR", "Countries"),
+    "mmr": ("admin0", None, "Myanmar", "Myanmar", "Countries"),
+    "tha": ("admin0", None, "Thailand", "Thailand", "Countries"),
+    "vnm": ("admin0", None, "Vietnam", "Vietnam", "Countries"),
     "ktinggi": ("mys2", None, "Kota Tinggi", "Kota Tinggi (Johor)", "Districts"),
     "mersing": ("mys2", None, "Mersing", "Mersing (Johor)", "Districts"),
 }

@@ -103,12 +103,12 @@ current tab; click or drag on the charts to move the time slider. The places:
 |---|---|
 | Riau, Jambi, South Sumatra | provinces, Natural Earth admin-1 outlines |
 | West, Central, South Kalimantan | provinces, same source |
-| Cambodia | whole country, Natural Earth admin-0 outline (about 240 grid cells) |
+| Cambodia, Lao PDR, Myanmar, Thailand, Vietnam | whole countries, Natural Earth admin-0 outlines (about 240, 310, 920, 690 and 450 grid cells) |
 | Kota Tinggi, Mersing (Johor) | districts, geoBoundaries ADM2 outlines (about 4.5 and 3.6 grid cells) |
 | Kyushu (Japan) | the 7 prefectures of the island merged into one outline (Natural Earth admin-1; the far southern Kagoshima islands left out), about 63 grid cells |
 | Singapore | box, 0.5 x 0.5 degrees (the 2 x 2 grid cells around the island) |
 
-* **Outlines:** `regions.geojson` (40 KB) holds the province, country and district outlines, rounded and simplified to 0.01
+* **Outlines:** `regions.geojson` (about 110 KB) holds the province, country and district outlines, rounded and simplified to 0.01
   degrees from Natural Earth 10m admin-1 and admin-0 (public domain) and, for the Johor districts, geoBoundaries gbOpen ADM2
   (CC BY 4.0, https://www.geoboundaries.org; credited in the page footer). `python tools/make_regions.py` rebuilds it (areas made of several admin-1 units, like Kyushu, are dissolved into one outline); add a province or country by adding a line to
   `REGIONS` there; the page picks it up with no other change.
