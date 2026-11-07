@@ -54,12 +54,12 @@ window.addEventListener("load", function () {
     return pending[key];
   }
 
-  function shadeKind() { return state.shade.indexOf("speed") === 0 ? "speed" : state.shade === "rain" ? "rain" : state.shade === "cdd" ? "cdd" : state.shade === "aod" ? "aod" : state.shade === "accum" ? "accum" : "rh"; }
+  function shadeKind() { return state.shade.indexOf("speed") === 0 ? "speed" : state.shade === "rain" ? "rain" : state.shade === "cdd" ? "cdd" : state.shade === "aod" ? "aod" : state.shade === "accum" ? "accum" : state.shade.indexOf("conv") === 0 ? "conv" : "rh"; }
   function shadeFile() { return state.shade === "rh" ? "rh" + M.rhLevel : state.shade === "accum" ? "rain" : state.shade; }
   function neededFiles() {                  // [model, file] pairs for the current frame
     var m = state.model, f;
     if (inCdd()) return [[m, "cdd"]];
-    f = state.shade === "aod" ? [[m, "aod"]] : [[m, shadeFile().replace(/^speed/, "uv")]];
+    f = state.shade === "aod" ? [[m, "aod"]] : [[m, shadeFile().replace(/^(speed|conv)/, "uv")]];
     if (state.style !== "off" && !noFlow()) f.push([flowModel(), "uv" + state.level]);
     return f.filter(function (a, i) { return f.findIndex(function (b) { return b[0] === a[0] && b[1] === a[1]; }) === i; });
   }
@@ -79,14 +79,15 @@ window.addEventListener("load", function () {
   var LUTS = {};
   function lut(kind) {
     if (LUTS[kind]) return LUTS[kind];
-    var P = M.palettes[kind], vmax = { speed: 150, rain: 300, rh: 100, cdd: 40, aod: 6, accum: 400 }[kind], scale = { speed: 4, rain: 10, rh: 4, cdd: 1, aod: 100, accum: 2 }[kind];
+    var P = M.palettes[kind], vmax = { speed: 150, rain: 300, rh: 100, cdd: 40, aod: 6, accum: 400, conv: 40 }[kind], scale = { speed: 4, rain: 10, rh: 4, cdd: 1, aod: 100, accum: 2, conv: 4 }[kind];
+    var off = kind === "conv" ? CONV_OFF : 0;                // the convergence field is shifted by CONV_OFF so that negative values index the table
     var n = Math.ceil(vmax * scale) + 1, t = new Uint32Array(n);
     var rgba = P.colors.map(function (c, i) {
       var r = parseInt(c.substr(1, 2), 16), g = parseInt(c.substr(3, 2), 16), b = parseInt(c.substr(5, 2), 16);
       return ((Math.round(P.alpha[i] * 255) << 24) | (b << 16) | (g << 8) | r) >>> 0;
     });
     for (var i = 0; i < n; i++) {
-      var v = i / scale, k = 0;
+      var v = i / scale - off, k = 0;
       while (k < P.edges.length && v >= P.edges[k]) k++;
       t[i] = rgba[k];
     }
@@ -165,6 +166,36 @@ window.addEventListener("load", function () {
   var field = new Float32Array(N);
   var shadeSrc = null;                       // {canvas, bounds} of the last rendered raster
 
+  // wind convergence = minus the horizontal divergence of the wind on the sphere,
+  //   div = du/dx + dv/dy - v tan(lat) / R,  with centred differences over two grid steps (one-sided at the edges),
+  // in 1e-5 per second, then smoothed with a 3 x 3 binomial filter; stored in `field` shifted by CONV_OFF
+  var CONV_OFF = 20, R_EARTH = 6.371e6, convTmp = new Float32Array(N);
+  function convergence(uv, base) {
+    var dy = R_EARTH * G.d * RAD, i, j, k;
+    for (i = 0; i < NY; i++) {
+      var lat = (LAT_N - i * G.d) * RAD, dx = R_EARTH * Math.cos(lat) * G.d * RAD, tn = Math.tan(lat) / R_EARTH;
+      var iN = i > 0 ? i - 1 : i, iS = i < NY - 1 ? i + 1 : i;                // rows run from north to south
+      for (j = 0; j < NX; j++) {
+        var jW = j > 0 ? j - 1 : j, jE = j < NX - 1 ? j + 1 : j;
+        k = i * NX + j;
+        var dudx = (uv[base + i * NX + jE] - uv[base + i * NX + jW]) * 0.1 / ((jE - jW) * dx);
+        var dvdy = (uv[base + N + iN * NX + j] - uv[base + N + iS * NX + j]) * 0.1 / ((iS - iN) * dy);
+        convTmp[k] = -(dudx + dvdy - uv[base + N + k] * 0.1 * tn) * 1e5;
+      }
+    }
+    for (i = 0; i < NY; i++) {                                                  // smooth along the rows ...
+      for (j = 0; j < NX; j++) {
+        k = i * NX + j;
+        field[k] = (convTmp[k - (j > 0 ? 1 : 0)] + 2 * convTmp[k] + convTmp[k + (j < NX - 1 ? 1 : 0)]) / 4;
+      }
+    }
+    for (i = 0; i < NY; i++) {                                                  // ... then down the columns
+      var a = (i > 0 ? i - 1 : i) * NX, c = (i < NY - 1 ? i + 1 : i) * NX;
+      for (j = 0; j < NX; j++) convTmp[i * NX + j] = (field[a + j] + 2 * field[i * NX + j] + field[c + j]) / 4;
+    }
+    for (k = 0; k < N; k++) field[k] = convTmp[k] + CONV_OFF;
+  }
+
   function accWindow() {                   // rolling window of state.accDays days that ends at the shown step
     var d = M.models[state.model], e = state.t, endS = d.valid[e], startS = endS - state.accDays * 86400, i0 = 0;
     while (i0 <= e && d.valid[i0] <= startS) i0++;           // first step whose interval ends after the window start
@@ -174,7 +205,9 @@ window.addEventListener("load", function () {
 
   function fillField() {                    // shading variable in display units for the current frame
     var kind = shadeKind(), i;
-    if (kind === "speed") {
+    if (kind === "conv") {
+      convergence(get(shadeFile().replace(/^conv/, "uv")), state.t * 2 * N);
+    } else if (kind === "speed") {
       var uv = get(shadeFile().replace(/^speed/, "uv")), b = state.t * 2 * N, k = 0.1 * KT;
       for (i = 0; i < N; i++) field[i] = Math.hypot(uv[b + i], uv[b + N + i]) * k;
     } else if (kind === "accum") {          // rain summed over the rolling window (the file holds 0.1 mm per model interval)
@@ -469,6 +502,7 @@ window.addEventListener("load", function () {
   function legendTitle() {
     var kind = shadeKind();
     if (kind === "speed") return "Wind speed at " + lvl(state.shade.replace("speed", "")) + " (knots)";
+    if (kind === "conv") return "Wind convergence at " + lvl(state.shade.replace("conv", "")) + " (10\u207b\u2075 s\u207b\u00b9)";
     if (kind === "rh") return "Relative humidity at " + M.rhLevel + " hPa (%)";
     if (kind === "cdd") return "Consecutive dry days: longest spell so far";
     if (kind === "aod") return "Organic matter aerosol optical depth at 550 nm (CAMS)";
@@ -484,7 +518,8 @@ window.addEventListener("load", function () {
     var kind = shadeKind(), P = M.palettes[kind], bar = el("wv-legend-bar"), ticks = el("wv-legend-ticks");
     el("wv-legend-title").textContent = legendTitle();
     var note = el("wv-legend-note");
-    note.hidden = kind !== "cdd" && kind !== "aod" && kind !== "accum";
+    note.hidden = kind !== "cdd" && kind !== "aod" && kind !== "accum" && kind !== "conv";
+    if (kind === "conv") note.textContent = "Blue: convergence, brown: divergence. Differences over 0.5\u00b0, smoothed over 3 \u00d7 3 cells.";
     if (kind === "aod") note.textContent = "Generated using Copernicus Atmosphere Monitoring Service information.";
     if (kind === "accum") {
       var aw = accWindow(), span = fmt(Math.max(aw.startS, M.models[state.model].valid[0]), { day: "2-digit", month: "short", hour: "2-digit" }) + "Z \u2192 " +
@@ -523,7 +558,7 @@ window.addEventListener("load", function () {
         parts.push(isNaN(c) ? "not land" : "longest dry spell so far: " + c + " days");
       }
     } else {
-      var shadeArr = get(shadeFile().replace(/^speed/, "uv")) || get(shadeFile());
+      var shadeArr = get(shadeFile().replace(/^(speed|conv)/, "uv")) || get(shadeFile());
       var uv = noFlow() ? null : flowArr();
       if (uv && flowBase() >= 0 && state.style !== "off" && sampleUV(uv, flowBase(), e.latlng.lng, e.latlng.lat)) {
         var kt = Math.hypot(su, sv) * 0.1 * KT, from = (270 - Math.atan2(sv, su) / RAD + 360) % 360;
@@ -531,7 +566,8 @@ window.addEventListener("load", function () {
       }
       if (shadeArr && shadeSrc && state.shade !== "speed" + state.level && gx >= 0 && gy >= 0 && gx <= NX - 1 && gy <= NY - 1) {
         var v = field[Math.round(gy) * NX + Math.round(gx)];
-        parts.push(state.shade.indexOf("speed") === 0 ? lvl(state.shade.replace("speed", "")) + " wind " + v.toFixed(0) + " kt" :
+        parts.push(state.shade.indexOf("conv") === 0 ? "convergence " + (v - CONV_OFF).toFixed(1) + " \u00d7 10\u207b\u2075 s\u207b\u00b9 at " + lvl(state.shade.replace("conv", "")) :
+          state.shade.indexOf("speed") === 0 ? lvl(state.shade.replace("speed", "")) + " wind " + v.toFixed(0) + " kt" :
           state.shade === "rain" ? v.toFixed(1) + " mm" : state.shade === "accum" ? v.toFixed(0) + " mm in " + (accWindow().partial ? "the first " + Math.round(accWindow().have / 3600) + " h" : state.accDays + " d") : state.shade === "aod" ? "organic matter AOD " + v.toFixed(2) : "RH " + v.toFixed(0) + "%");
       }
     }
@@ -626,6 +662,7 @@ window.addEventListener("load", function () {
     var d = M.models[model];
     if (d.shading) return d.shading.map(function (o) { return [o.value, o.label]; });
     var o = M.levels.map(function (l) { return ["speed" + l, "Wind speed " + lvl(l)]; });
+    M.levels.forEach(function (l) { o.push(["conv" + l, "Wind convergence " + lvl(l)]); });
     o.push(["rain", "Rain"], ["accum", "Accumulated rain"], ["rh", "Relative humidity " + M.rhLevel + " hPa"]);
     if (cddOf(model)) o.push(["cdd", "Consecutive dry days"]);
     return o;

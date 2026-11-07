@@ -98,6 +98,15 @@ def _cdd_colors(n=15):
 PALETTES["cdd"] = {"unit": "days", "edges": list(range(1, 16)), "colors": _cdd_colors(),
                    "alpha": [0.0] + [0.8] * 15, "ticks": [1, 5, 10, 15]}
 
+# wind convergence (minus the horizontal divergence), 1e-5 per second: positive = convergence, negative = divergence
+PALETTES["conv"] = {
+    "unit": "1e-5 1/s",
+    "edges": [-10, -6, -3, -1.5, 1.5, 3, 6, 10],
+    "colors": ["#8c510a", "#bf812d", "#dfc27d", "#f6e8c3", "#ffffff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"],
+    "alpha": [0.8, 0.8, 0.8, 0.8, 0.0, 0.8, 0.8, 0.8, 0.8],
+    "ticks": [-10, -3, 3, 10],
+}
+
 # rain accumulated over a user-chosen number of days (rolling window ending at the shown step), mm; top class is 300 and above
 PALETTES["accum"] = {
     "unit": "mm",

@@ -75,6 +75,17 @@ A **CAMS** tab shows the CAMS global forecast of organic matter aerosol optical 
   wind file of one level (~3.5 MB) is loaded only when the CAMS tab is shown.
 * Data: Generated using Copernicus Atmosphere Monitoring Service information.
 
+## Wind convergence
+
+The Shading menu has **Wind convergence** for each wind level (925, 850, 700 hPa and 10 m): minus the horizontal divergence of
+the wind, in 10^-5 per second. Positive (blue) is convergence, negative (brown) divergence; values between -1.5 and 1.5
+are left uncoloured. It is computed in the browser from the wind data already loaded, so nothing extra is downloaded, and
+it follows the time slider. Method: `div = du/dx + dv/dy - v tan(lat) / R` on the sphere (the last term is the curvature
+of the grid, 0.1 to 3 x 10^-5 at 10 to 50 N), with centred differences over two grid steps (0.5 degrees, one-sided at the
+edge of the map), then a 3 x 3 binomial smoothing. Remember that a field of derivatives is noisy: single grid-point
+features are not meaningful, and over steep terrain (925 and 850 hPa under the Tibetan plateau, the Himalaya) the
+pressure-level winds are extrapolated by the model. Checked against an analytic wind field with a known convergence.
+
 ## 10 m wind
 
 The wind has four levels: 925, 850 and 700 hPa and the **10 m wind** (`10u`, `10v`, published for both IFS and AIFS), written
