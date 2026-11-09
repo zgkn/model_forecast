@@ -120,7 +120,7 @@ window.addEventListener("load", function () {
   }
   var shadeLayer = canvasLayer("wv-shade", 410);
   map.createPane("wv-coast"); map.getPane("wv-coast").style.zIndex = 420;
-  map.createPane("wv-cdd"); map.getPane("wv-cdd").style.zIndex = 430;     // dry-spell outlines (clickable)
+  map.createPane("wv-cdd"); map.getPane("wv-cdd").style.zIndex = 470;     // dry-spell outlines (clickable): above the time-series areas (460), which would take their clicks
   var flowLayer = canvasLayer("wv-flow", 450);
 
   fetch("data/coastlines.json").then(function (r) { return r.json(); }).then(function (gj) {
